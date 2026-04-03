@@ -1,29 +1,34 @@
-# README #
+# reclutalia-aws-pr-bot
 
-This README would normally document whatever steps are necessary to get your application up and running.
+Bot de Telegram que automatiza la aprobación y merge de PRs en AWS CodeCommit.
 
-### What is this repository for? ###
+## Flujo
 
-* Quick summary
-* Version
-* [Learn Markdown](https://bitbucket.org/tutorials/markdowndemo)
+1. Detecta URLs de CodeCommit en canales/grupos de Telegram
+2. Login automático en AWS (con MFA manual en el browser)
+3. Switch de roles: Authorizer → Manager → MergeMaster
+4. Aprueba el PR con cada rol y hace merge con 3-way merge
 
-### How do I get set up? ###
+## Setup
 
-* Summary of set up
-* Configuration
-* Dependencies
-* Database configuration
-* How to run tests
-* Deployment instructions
+```bash
+npm install
+cp .env.example .env
+# Editar .env con tus credenciales
+```
 
-### Contribution guidelines ###
+## Uso
 
-* Writing tests
-* Code review
-* Other guidelines
+```bash
+# Desarrollo
+npm run dev
 
-### Who do I talk to? ###
+# Producción
+npm run build
+npm start
+```
 
-* Repo owner or admin
-* Other community or team contact
+## Comandos del bot
+
+- `/status` — Ver estado del bot
+- `/pr <url>` — Procesar PR manualmente (solo owner)

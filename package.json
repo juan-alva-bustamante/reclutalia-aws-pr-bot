@@ -1,0 +1,32 @@
+{
+  "name": "reclutalia-aws-pr-bot",
+  "version": "1.0.0",
+  "description": "Bot de Telegram para automatizar aprobación y merge de PRs en AWS CodeCommit",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "dev": "tsx src/main.ts",
+    "lint": "eslint src/",
+    "postinstall": "npx playwright install chromium"
+  },
+  "keywords": [
+    "telegram",
+    "aws",
+    "codecommit",
+    "pr",
+    "automation"
+  ],
+  "license": "PRIVATE",
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "playwright": "^1.52.0",
+    "telegraf": "^4.16.3",
+    "winston": "^3.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
