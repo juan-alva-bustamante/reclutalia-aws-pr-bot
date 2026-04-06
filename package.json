@@ -4,6 +4,7 @@
   "description": "Bot de Telegram para automatizar aprobación y merge de PRs en AWS CodeCommit",
   "main": "dist/main.js",
   "scripts": {
+    "validate": "npx tsc --noEmit",
     "build": "tsc",
     "start": "npm run build && node dist/main.js",
     "dev": "npm run build && tsx src/main.ts",

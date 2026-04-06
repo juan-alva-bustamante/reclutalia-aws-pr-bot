@@ -374,10 +374,11 @@ export class AWSBrowser {
       await submitBtn.click();
 
       try {
-        await this.pg.waitForLoadState("networkidle", { timeout: 15_000 });
+        await this.pg.waitForLoadState("domcontentloaded", { timeout: 15_000 });
       } catch {
         /* timeout ok */
       }
+      await this.waitForAwsLoaders(15_000);
       await this.waitForDomStable();
 
       logger.info(`[AWS] Rol ${roleName} activado ✅`);
@@ -395,46 +396,16 @@ export class AWSBrowser {
     try {
       await this.navigateAndWait(prUrl, { timeout: 60_000 });
 
-      // Intentar click en Approve via JS (bypasea shadow DOM)
-      const clicked = await this.pg.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll("button"));
-        // Exacto
-        for (const btn of buttons) {
-          const text = (btn.innerText || btn.textContent || "")
-            .trim()
-            .toLowerCase();
-          if (text === "approve" && btn.offsetParent !== null) {
-            btn.scrollIntoView({ behavior: "instant", block: "center" });
-            btn.click();
-            return { found: true, text: btn.innerText.trim() };
-          }
-        }
-        // Contiene 'approve' pero no 'revoke'
-        for (const btn of buttons) {
-          const text = (btn.innerText || btn.textContent || "")
-            .trim()
-            .toLowerCase();
-          if (
-            text.includes("approve") &&
-            !text.includes("revoke") &&
-            btn.offsetParent !== null
-          ) {
-            btn.scrollIntoView({ behavior: "instant", block: "center" });
-            btn.click();
-            return { found: true, text: btn.innerText.trim() };
-          }
-        }
-        return { found: false, text: "" };
-      });
-
-      if (clicked.found) {
-        logger.info(`[AWS] ✅ Approve via JS: '${clicked.text}'`);
-        await this.sleep(3_000);
+      // Esperar a que el botón Approve aparezca en la página (polling)
+      const approveBtn = await this.waitForButton("Approve", 30_000);
+      if (approveBtn) {
+        logger.info(`[AWS] ✅ Approve via polling: '${approveBtn}'`);
+        await this.sleep(2_000);
         return true;
       }
 
       // Fallback: Playwright locators
-      logger.warn("[AWS] JS no encontró Approve, intentando locators...");
+      logger.warn("[AWS] Polling no encontró Approve, intentando locators...");
       for (const sel of [
         "button:has(span:text-is('Approve'))",
         "button >> text=Approve",
@@ -477,9 +448,13 @@ export class AWSBrowser {
       await this.navigateAndWait(prUrl, { timeout: 60_000 });
 
       // Click en botón "Merge"
-      if (!(await this.clickMergeButton())) {
-        await this.pg.screenshot({ path: "error_merge_no_button.png" });
-        throw new Error("Botón Merge no encontrado");
+      const mergeClicked = await this.waitForButton("Merge", 30_000);
+      if (!mergeClicked) {
+        // Playwright fallback
+        if (!(await this.clickMergeButton())) {
+          await this.pg.screenshot({ path: "error_merge_no_button.png" });
+          throw new Error("Botón Merge no encontrado");
+        }
       }
 
       // Esperar página de merge
@@ -825,8 +800,68 @@ export class AWSBrowser {
   // ── Navigation ───────────────────────────────────────────
 
   /**
-   * Navega a una URL y espera a que la página esté completamente cargada:
-   * 1. Espera networkidle (sin requests pendientes por 500ms)
+   * Espera a que un botón con el texto exacto aparezca visible en la página,
+   * haciendo polling cada 2s. Cuando lo encuentra, le da click.
+   * Retorna el texto del botón si lo encontró, o null si se agotó el timeout.
+   */
+  private async waitForButton(
+    buttonText: string,
+    timeout = 30_000,
+  ): Promise<string | null> {
+    const deadline = Date.now() + timeout;
+    const textLower = buttonText.toLowerCase();
+
+    logger.info(`[AWS] ⏳ Esperando botón '${buttonText}'...`);
+
+    while (Date.now() < deadline) {
+      const result = await this.pg.evaluate((textLower) => {
+        const buttons = Array.from(document.querySelectorAll("button"));
+        // Exacto
+        for (const btn of buttons) {
+          const text = (btn.innerText || btn.textContent || "")
+            .trim()
+            .toLowerCase();
+          if (
+            text === textLower &&
+            btn.offsetParent !== null &&
+            !btn.disabled
+          ) {
+            btn.scrollIntoView({ behavior: "instant", block: "center" });
+            btn.click();
+            return btn.innerText.trim();
+          }
+        }
+        // Contiene el texto (pero no 'revoke' ni 'close')
+        for (const btn of buttons) {
+          const text = (btn.innerText || btn.textContent || "")
+            .trim()
+            .toLowerCase();
+          if (
+            text.includes(textLower) &&
+            !text.includes("revoke") &&
+            !text.includes("close") &&
+            btn.offsetParent !== null &&
+            !btn.disabled
+          ) {
+            btn.scrollIntoView({ behavior: "instant", block: "center" });
+            btn.click();
+            return btn.innerText.trim();
+          }
+        }
+        return null;
+      }, textLower);
+
+      if (result) return result;
+
+      await this.sleep(2_000);
+    }
+
+    return null;
+  }
+
+  /**
+   * Navega a una URL y espera a que la página esté lista para interactuar:
+   * 1. goto con domcontentloaded (no networkidle — AWS nunca para de hacer requests)
    * 2. Espera a que desaparezcan spinners/loaders de la consola AWS
    * 3. Espera estabilidad del DOM (sin mutaciones por 1s)
    */
@@ -837,13 +872,12 @@ export class AWSBrowser {
     const timeout = opts?.timeout ?? 60_000;
     logger.info(`[AWS] Navegando a: ${url}`);
 
-    // 1. goto con networkidle — espera a que no haya requests por 500ms
-    await this.pg.goto(url, { waitUntil: "networkidle", timeout });
+    await this.pg.goto(url, { waitUntil: "domcontentloaded", timeout });
 
-    // 2. Esperar que desaparezcan spinners/loaders de AWS Console
+    // Esperar que desaparezcan spinners/loaders de AWS Console
     await this.waitForAwsLoaders(timeout);
 
-    // 3. Esperar estabilidad del DOM (sin mutaciones por 1s)
+    // Esperar estabilidad del DOM
     await this.waitForDomStable();
 
     await this.dismissPopups();
