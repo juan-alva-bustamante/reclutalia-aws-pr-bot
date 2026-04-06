@@ -5,8 +5,8 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/main.js",
-    "dev": "tsx src/main.ts",
+    "start": "npm run build && node dist/main.js",
+    "dev": "npm run build && tsx src/main.ts",
     "lint": "eslint src/",
     "postinstall": "npx playwright install chromium"
   },

@@ -115,8 +115,69 @@ export class AWSBrowser {
     }
   }
 
+  /** Salta la pantalla "Handle expiring password" si aparece post-login */
+  private async skipExpiringPassword(): Promise<void> {
+    try {
+      const skipSelectors = [
+        "a:has-text('Skip and continue to sign in')",
+        "a:has-text('Skip')",
+        "button:has-text('Skip')",
+      ];
+
+      for (const sel of skipSelectors) {
+        try {
+          const link = this.pg.locator(sel).first();
+          if (await link.isVisible({ timeout: 3_000 })) {
+            await link.click();
+            logger.info("[AWS] 🔑 Pantalla 'Handle expiring password' saltada");
+            await this.pg.waitForLoadState("domcontentloaded", {
+              timeout: 10_000,
+            });
+            await this.sleep(2_000);
+            return;
+          }
+        } catch {
+          /* next selector */
+        }
+      }
+    } catch {
+      /* no expiring password screen */
+    }
+  }
+
+  private async dismissCookieModal(): Promise<void> {
+    try {
+      // El banner de cookies de AWS usa el id "awsccc-cb-btn-accept"
+      // o un botón con texto "Accept" dentro del banner de cookies
+      const cookieSelectors = [
+        "#awsccc-cb-btn-accept",
+        "button[data-id='awsccc-cb-btn-accept']",
+        "#awsccc-cb-content button:has-text('Accept')",
+        "[id*='awsccc'] button:has-text('Accept')",
+        "div[class*='cookie'] button:has-text('Accept')",
+      ];
+
+      for (const sel of cookieSelectors) {
+        try {
+          const btn = this.pg.locator(sel).first();
+          if (await btn.isVisible({ timeout: 1_000 })) {
+            await btn.click();
+            logger.info("[AWS] 🍪 Modal de cookies aceptado");
+            await this.sleep(500);
+            return;
+          }
+        } catch {
+          /* next selector */
+        }
+      }
+    } catch {
+      /* no cookie modal */
+    }
+  }
+
   private async dismissPopups(): Promise<void> {
     await this.dismissFeedbackModal();
+    await this.dismissCookieModal();
     for (const sel of SAFE_POPUP_SELECTORS) {
       try {
         const btn = this.pg.locator(sel).first();
@@ -216,6 +277,9 @@ export class AWSBrowser {
     // MFA (manual — el usuario lo ingresa en el browser)
     await this.waitForManualMfa();
 
+    // Skip "Handle expiring password" si aparece
+    await this.skipExpiringPassword();
+
     await this.dismissPopups();
     await this.sleep(1_000);
 
@@ -224,6 +288,7 @@ export class AWSBrowser {
 
     if (url.includes("console.aws.amazon.com") || url.includes("console.aws")) {
       await this.saveSession();
+      await this.dismissCookieModal();
       logger.info("[AWS] ✅ Login exitoso");
       return true;
     }
@@ -234,6 +299,7 @@ export class AWSBrowser {
     // URL inesperada post-login — asumir éxito
     logger.warn(`[AWS] URL inesperada post-login: ${url} — asumiendo éxito`);
     await this.saveSession();
+    await this.dismissCookieModal();
     return true;
   }
 
