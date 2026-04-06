@@ -20,14 +20,14 @@
   ],
   "license": "PRIVATE",
   "dependencies": {
-    "dotenv": "^16.4.7",
-    "playwright": "^1.52.0",
-    "telegraf": "^4.16.3",
-    "winston": "^3.17.0"
+    "dotenv": "16.6.1",
+    "playwright": "1.59.1",
+    "telegraf": "4.16.3",
+    "winston": "3.19.0"
   },
   "devDependencies": {
-    "@types/node": "^22.15.0",
-    "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "@types/node": "22.19.15",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3"
   }
 }
