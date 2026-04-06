@@ -6,18 +6,32 @@ import { extractPrUrl, parsePrInfo } from "../utils/url-parser.js";
 import type { AWSBrowser } from "../aws/browser.js";
 import type { PrInfo } from "../types.js";
 
+/** Helper to send a message to the configured topic (if any) */
+async function sendToTopic(
+  ctx: Context,
+  chatId: number | string,
+  text: string,
+  parseMode?: "Markdown" | "MarkdownV2",
+): Promise<void> {
+  await ctx.telegram.sendMessage(chatId, text, {
+    parse_mode: parseMode,
+    message_thread_id: config.telegram.topicId,
+  });
+}
+
 export function createBot(awsBrowser: AWSBrowser): Telegraf {
   const bot = new Telegraf(config.telegram.token);
 
   // /status
   bot.command("status", async (ctx) => {
-    await ctx.replyWithMarkdownV2(
+    await ctx.reply(
       "🤖 *Bot de PR Autorización*\n\n" +
         "✅ Activo y escuchando\n" +
         "📡 Monitoreando URLs de CodeCommit\n\n" +
         "Comandos:\n" +
         "/status \\- Ver estado\n" +
         "/pr <url> \\- Procesar PR manualmente",
+      { parse_mode: "MarkdownV2", message_thread_id: config.telegram.topicId },
     );
   });
 
@@ -40,7 +54,11 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
       return;
     }
 
-    await ctx.reply(`⏳ Procesando PR #${prInfo.prNumber} manualmente...`);
+    await sendToTopic(
+      ctx,
+      ctx.chat.id,
+      `⏳ Procesando PR #${prInfo.prNumber} manualmente...`,
+    );
     runPrFlow(ctx, awsBrowser, url, prInfo);
   });
 
@@ -52,6 +70,14 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
     // Solo procesar mensajes de grupos/canales/supergrupos
     if (chatType === "private") return;
 
+    // Si hay topicId configurado, solo procesar mensajes de ese topic
+    if (
+      config.telegram.topicId &&
+      ctx.message.message_thread_id !== config.telegram.topicId
+    ) {
+      return;
+    }
+
     const prUrl = extractPrUrl(text);
     if (!prUrl) return;
 
@@ -60,12 +86,14 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
 
     logger.info(`PR detectado: ${JSON.stringify(prInfo)}`);
 
-    await ctx.reply(
+    await sendToTopic(
+      ctx,
+      ctx.chat.id,
       `🔍 *PR detectado automáticamente*\n\n` +
         `📦 Repo: \`${prInfo.repo}\`\n` +
         `🔢 PR \\#: \`${prInfo.prNumber}\`\n\n` +
         `⏳ Iniciando proceso de autorización\\.\\.\\.`,
-      { parse_mode: "MarkdownV2" },
+      "MarkdownV2",
     );
 
     runPrFlow(ctx, awsBrowser, prUrl, prInfo);
@@ -89,13 +117,14 @@ function runPrFlow(
 
       if (result.success) {
         const stepsText = result.steps.join("\n");
-        await ctx.telegram.sendMessage(
+        await sendToTopic(
+          ctx,
           chatId,
           `✅ *PR procesado exitosamente*\n\n` +
             `📦 Repo: \`${prInfo.repo}\`\n` +
             `🔢 PR #: \`${prInfo.prNumber}\`\n\n` +
             `*Pasos completados:*\n${stepsText}`,
-          { parse_mode: "Markdown" },
+          "Markdown",
         );
         // Notificar al owner por DM
         await ctx.telegram.sendMessage(
@@ -107,7 +136,8 @@ function runPrFlow(
         const stepsText = result.steps.length
           ? result.steps.join("\n")
           : "Ninguno";
-        await ctx.telegram.sendMessage(
+        await sendToTopic(
+          ctx,
           chatId,
           `❌ *Error procesando PR*\n\n` +
             `📦 Repo: \`${prInfo.repo}\`\n` +
@@ -115,7 +145,7 @@ function runPrFlow(
             `*Pasos completados:*\n${stepsText}\n\n` +
             `*Error:* \`${result.error}\`\n\n` +
             `⚠️ Revisa el PR manualmente: ${prUrl}`,
-          { parse_mode: "Markdown" },
+          "Markdown",
         );
       }
     } catch (e) {

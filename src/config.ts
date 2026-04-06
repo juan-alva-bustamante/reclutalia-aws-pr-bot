@@ -11,6 +11,9 @@ export const config = {
     token: required("TELEGRAM_BOT_TOKEN"),
     chatId: required("TELEGRAM_CHAT_ID"),
     ownerUserId: Number(required("TELEGRAM_OWNER_USER_ID")),
+    topicId: process.env.TELEGRAM_TOPIC_ID
+      ? Number(process.env.TELEGRAM_TOPIC_ID)
+      : undefined,
   },
   aws: {
     loginUrl: required("AWS_LOGIN_URL"),

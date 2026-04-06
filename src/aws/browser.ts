@@ -67,6 +67,14 @@ export class AWSBrowser {
     await this.page.addInitScript(AUTO_DISMISS_SCRIPT);
   }
 
+  /** Ensures the browser is started. Safe to call multiple times. */
+  async ensureStarted(): Promise<void> {
+    if (this.browser && this.page) return;
+    logger.info("🌐 Iniciando browser...");
+    await this.start();
+    logger.info("🌐 Browser iniciado ✅");
+  }
+
   async close(): Promise<void> {
     await this.browser?.close();
     this.browser = null;
@@ -283,9 +291,7 @@ export class AWSBrowser {
   ): Promise<boolean> {
     logger.info(`[AWS] Cambiando a rol: ${roleName}`);
     try {
-      await this.pg.goto(roleUrl, { waitUntil: "domcontentloaded" });
-      await this.sleep(1_000);
-      await this.dismissPopups();
+      await this.navigateAndWait(roleUrl, { timeout: 30_000 });
 
       const submitBtn = this.pg
         .locator(
@@ -302,11 +308,11 @@ export class AWSBrowser {
       await submitBtn.click();
 
       try {
-        await this.pg.waitForLoadState("domcontentloaded", { timeout: 15_000 });
+        await this.pg.waitForLoadState("networkidle", { timeout: 15_000 });
       } catch {
         /* timeout ok */
       }
-      await this.sleep(3_000);
+      await this.waitForDomStable();
 
       logger.info(`[AWS] Rol ${roleName} activado ✅`);
       return true;
@@ -321,12 +327,7 @@ export class AWSBrowser {
   private async approvePr(prUrl: string): Promise<boolean> {
     logger.info(`[AWS] Navegando al PR para APROBAR: ${prUrl}`);
     try {
-      await this.pg.goto(prUrl, {
-        waitUntil: "domcontentloaded",
-        timeout: 30_000,
-      });
-      await this.sleep(6_000);
-      await this.dismissPopups();
+      await this.navigateAndWait(prUrl, { timeout: 60_000 });
 
       // Intentar click en Approve via JS (bypasea shadow DOM)
       const clicked = await this.pg.evaluate(() => {
@@ -407,12 +408,7 @@ export class AWSBrowser {
   private async mergePr(prUrl: string): Promise<boolean> {
     logger.info(`[AWS] Navegando al PR para MERGE: ${prUrl}`);
     try {
-      await this.pg.goto(prUrl, {
-        waitUntil: "domcontentloaded",
-        timeout: 30_000,
-      });
-      await this.sleep(6_000);
-      await this.dismissPopups();
+      await this.navigateAndWait(prUrl, { timeout: 60_000 });
 
       // Click en botón "Merge"
       if (!(await this.clickMergeButton())) {
@@ -423,13 +419,11 @@ export class AWSBrowser {
       // Esperar página de merge
       try {
         await this.pg.waitForURL("**/merge**", { timeout: 15_000 });
-        await this.pg.waitForSelector('input[value="THREE_WAY_MERGE"]', {
-          timeout: 15_000,
-        });
       } catch {
         logger.warn(`[AWS] URL no cambió a /merge, actual: ${this.pg.url()}`);
       }
-      await this.sleep(5_000);
+      await this.waitForAwsLoaders(15_000);
+      await this.waitForDomStable();
       await this.dismissPopups();
 
       // Seleccionar 3-way merge
@@ -706,6 +700,9 @@ export class AWSBrowser {
     const result: PrFlowResult = { success: false, steps: [] };
 
     try {
+      // 0. Ensure browser is running
+      await this.ensureStarted();
+
       // 1. Login
       if (!(await this.isLoggedIn())) {
         if (!(await this.login())) {
@@ -757,6 +754,104 @@ export class AWSBrowser {
     }
 
     return result;
+  }
+
+  // ── Navigation ───────────────────────────────────────────
+
+  /**
+   * Navega a una URL y espera a que la página esté completamente cargada:
+   * 1. Espera networkidle (sin requests pendientes por 500ms)
+   * 2. Espera a que desaparezcan spinners/loaders de la consola AWS
+   * 3. Espera estabilidad del DOM (sin mutaciones por 1s)
+   */
+  private async navigateAndWait(
+    url: string,
+    opts?: { timeout?: number },
+  ): Promise<void> {
+    const timeout = opts?.timeout ?? 60_000;
+    logger.info(`[AWS] Navegando a: ${url}`);
+
+    // 1. goto con networkidle — espera a que no haya requests por 500ms
+    await this.pg.goto(url, { waitUntil: "networkidle", timeout });
+
+    // 2. Esperar que desaparezcan spinners/loaders de AWS Console
+    await this.waitForAwsLoaders(timeout);
+
+    // 3. Esperar estabilidad del DOM (sin mutaciones por 1s)
+    await this.waitForDomStable();
+
+    await this.dismissPopups();
+    logger.info("[AWS] ✅ Página cargada completamente");
+  }
+
+  /** Espera a que los spinners/loaders típicos de AWS Console desaparezcan */
+  private async waitForAwsLoaders(timeout: number): Promise<void> {
+    const loaderSelectors = [
+      "[class*='loading']",
+      "[class*='spinner']",
+      "[class*='Spinner']",
+      "awsui-spinner",
+      "[data-testid='loading']",
+      ".awsui-spinner",
+      "[class*='awsui'][class*='loading']",
+    ];
+
+    const deadline = Date.now() + timeout;
+
+    for (const sel of loaderSelectors) {
+      while (Date.now() < deadline) {
+        try {
+          const visible = await this.pg
+            .locator(sel)
+            .first()
+            .isVisible({ timeout: 500 });
+          if (!visible) break;
+          logger.info(`[AWS] ⏳ Esperando loader: ${sel}`);
+          await this.sleep(500);
+        } catch {
+          break;
+        }
+      }
+    }
+  }
+
+  /** Espera a que el DOM se estabilice (sin mutaciones por 1 segundo) */
+  private async waitForDomStable(
+    stableMs = 1_000,
+    timeout = 15_000,
+  ): Promise<void> {
+    try {
+      await this.pg.evaluate(
+        ({ stableMs, timeout }) =>
+          new Promise<void>((resolve) => {
+            let timer: ReturnType<typeof setTimeout>;
+            const maxTimer = setTimeout(resolve, timeout);
+            const observer = new MutationObserver(() => {
+              clearTimeout(timer);
+              timer = setTimeout(() => {
+                observer.disconnect();
+                clearTimeout(maxTimer);
+                resolve();
+              }, stableMs);
+            });
+            observer.observe(document.body, {
+              childList: true,
+              subtree: true,
+              attributes: true,
+            });
+            // Kick off initial timer in case DOM is already stable
+            timer = setTimeout(() => {
+              observer.disconnect();
+              clearTimeout(maxTimer);
+              resolve();
+            }, stableMs);
+          }),
+        { stableMs, timeout },
+      );
+    } catch {
+      // Si falla el evaluate, al menos esperamos un poco
+      await this.sleep(stableMs);
+    }
   }
 
   // ── Helpers ────────────────────────────────────────────────

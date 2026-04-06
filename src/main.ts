@@ -1,4 +1,3 @@
-import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { AWSBrowser } from "./aws/browser.js";
 import { createBot } from "./bot/telegram-bot.js";
@@ -7,13 +6,11 @@ async function main(): Promise<void> {
   logger.info("🚀 Iniciando bot de PR Autorización...");
 
   const awsBrowser = new AWSBrowser();
-  await awsBrowser.start();
-  logger.info("🌐 Browser iniciado");
-
   const bot = createBot(awsBrowser);
 
   logger.info("🤖 Bot de Telegram iniciado, escuchando mensajes...");
   logger.info("📡 Monitoreando URLs de CodeCommit en canales/grupos");
+  logger.info("🌐 Browser se iniciará cuando llegue un PR");
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {
