@@ -502,19 +502,34 @@ export class AWSBrowser {
 
   private async clickMergeButton(): Promise<boolean> {
     const clicked = await this.pg.evaluate(() => {
+      const excludeAncestors = [
+        "nav",
+        "header",
+        "[id*='nav']",
+        "[id*='menu']",
+        "[role='navigation']",
+        "[role='menu']",
+        "[role='menubar']",
+        "[class*='navbar']",
+        "[class*='header']",
+        "[id*='awsc-']",
+      ].join(", ");
+
       const buttons = Array.from(document.querySelectorAll("button"));
       for (const btn of buttons) {
+        if (btn.closest(excludeAncestors)) continue;
         const text = (btn.innerText || btn.textContent || "")
           .trim()
           .toLowerCase();
-        if (text === "merge" && btn.offsetParent !== null) {
+        if (text === "merge" && btn.offsetParent !== null && !btn.disabled) {
           btn.scrollIntoView({ behavior: "instant", block: "center" });
           btn.click();
           return true;
         }
       }
-      // Fallback: span/div con texto 'Merge' dentro de un botón
+      // Fallback: span/div con texto exacto 'Merge' dentro de un botón
       for (const el of Array.from(document.querySelectorAll("span, div, a"))) {
+        if (el.closest(excludeAncestors)) continue;
         if (
           el.children.length === 0 &&
           el.textContent?.trim().toLowerCase() === "merge"
@@ -675,8 +690,22 @@ export class AWSBrowser {
     await this.sleep(1_000);
 
     const clicked = await this.pg.evaluate(() => {
+      const excludeAncestors = [
+        "nav",
+        "header",
+        "[id*='nav']",
+        "[id*='menu']",
+        "[role='navigation']",
+        "[role='menu']",
+        "[role='menubar']",
+        "[class*='navbar']",
+        "[class*='header']",
+        "[id*='awsc-']",
+      ].join(", ");
+
       const buttons = Array.from(document.querySelectorAll("button"));
       for (const btn of buttons) {
+        if (btn.closest(excludeAncestors)) continue;
         const text = (btn.innerText || btn.textContent || "")
           .trim()
           .toLowerCase();
@@ -691,6 +720,7 @@ export class AWSBrowser {
         }
       }
       for (const btn of buttons) {
+        if (btn.closest(excludeAncestors)) continue;
         const text = (btn.innerText || btn.textContent || "")
           .trim()
           .toLowerCase();
@@ -802,6 +832,7 @@ export class AWSBrowser {
   /**
    * Espera a que un botón con el texto exacto aparezca visible en la página,
    * haciendo polling cada 2s. Cuando lo encuentra, le da click.
+   * Solo busca botones reales (<button>) fuera del header/nav de AWS.
    * Retorna el texto del botón si lo encontró, o null si se agotó el timeout.
    */
   private async waitForButton(
@@ -815,37 +846,38 @@ export class AWSBrowser {
 
     while (Date.now() < deadline) {
       const result = await this.pg.evaluate((textLower) => {
+        // Selectores del header/nav de AWS que debemos ignorar
+        const excludeAncestors = [
+          "nav",
+          "header",
+          "[id*='nav']",
+          "[id*='menu']",
+          "[role='navigation']",
+          "[role='menu']",
+          "[role='menubar']",
+          "[class*='navbar']",
+          "[class*='header']",
+          "[id*='awsc-']",
+        ].join(", ");
+
         const buttons = Array.from(document.querySelectorAll("button"));
-        // Exacto
+
         for (const btn of buttons) {
-          const text = (btn.innerText || btn.textContent || "")
-            .trim()
-            .toLowerCase();
+          // Ignorar botones dentro del header/nav de AWS
+          if (btn.closest(excludeAncestors)) continue;
+
+          const text = (btn.innerText || btn.textContent || "").trim();
+          const textLc = text.toLowerCase();
+
+          // Solo match exacto
           if (
-            text === textLower &&
+            textLc === textLower &&
             btn.offsetParent !== null &&
             !btn.disabled
           ) {
             btn.scrollIntoView({ behavior: "instant", block: "center" });
             btn.click();
-            return btn.innerText.trim();
-          }
-        }
-        // Contiene el texto (pero no 'revoke' ni 'close')
-        for (const btn of buttons) {
-          const text = (btn.innerText || btn.textContent || "")
-            .trim()
-            .toLowerCase();
-          if (
-            text.includes(textLower) &&
-            !text.includes("revoke") &&
-            !text.includes("close") &&
-            btn.offsetParent !== null &&
-            !btn.disabled
-          ) {
-            btn.scrollIntoView({ behavior: "instant", block: "center" });
-            btn.click();
-            return btn.innerText.trim();
+            return text;
           }
         }
         return null;
