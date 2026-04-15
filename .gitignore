@@ -6,3 +6,6 @@ aws_session.json
 error_*.png
 debug_*.png
 .DS_Store
+package-lock.json
+pr_queue.json
+pr_bitacora.txt

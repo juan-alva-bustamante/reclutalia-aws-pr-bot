@@ -28,6 +28,16 @@ npm run build
 npm start
 ```
 
+## Despliegue con PM2
+
+```bash
+# Compilar y levantar
+npm run build && pm2 start dist/main.js --name reclutalia-pr-auto-approver
+
+# Reiniciar después de cambios
+npm run build && pm2 restart reclutalia-pr-auto-approver
+```
+
 ## Comandos del bot
 
 - `/status` — Ver estado del bot

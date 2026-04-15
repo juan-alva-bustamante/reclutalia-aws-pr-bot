@@ -16,3 +16,14 @@ export interface PrFlowResult {
 export type Result<T = void> =
   | { ok: true; data: T }
   | { ok: false; error: string };
+
+/** Elemento en la cola de PRs */
+export interface QueueItem {
+  url: string;
+  repo: string;
+  prNumber: string;
+  status: "pending" | "processing" | "done" | "error";
+  addedAt: string;
+  chatId: number;
+  error?: string;
+}
