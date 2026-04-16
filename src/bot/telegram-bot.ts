@@ -1,4 +1,4 @@
-import { Telegraf, type Context } from "telegraf";
+import { Telegraf } from "telegraf";
 import { message } from "telegraf/filters";
 import { config } from "../config.js";
 import { logger } from "../logger.js";
@@ -8,12 +8,12 @@ import { logPrResult, getRecentLogs } from "../queue/pr-log.js";
 import type { AWSBrowser } from "../aws/browser.js";
 import type { PrInfo, QueueItem } from "../types.js";
 
-/** Helper to send a message to the configured topic (if any) */
+/** Helper to send a message to the configured topic */
 async function sendToTopic(
   telegram: Telegraf["telegram"],
   chatId: number | string,
   text: string,
-  parseMode?: "Markdown" | "MarkdownV2",
+  parseMode: "Markdown" | "MarkdownV2" = "Markdown",
 ): Promise<void> {
   await telegram.sendMessage(chatId, text, {
     parse_mode: parseMode,
@@ -37,16 +37,14 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
     await sendToTopic(
       bot.telegram,
       item.chatId,
-      `▶️ *Procesando PR \\#${prInfo.prNumber}*\n` +
+      `▶️ *Procesando PR #${prInfo.prNumber}*\n` +
         `📦 Repo: \`${prInfo.repo}\`\n\n` +
-        `⏳ Iniciando proceso de autorización\\.\\.\\.`,
-      "MarkdownV2",
+        `⏳ Iniciando proceso de autorización...`,
     );
 
     const result = await awsBrowser.fullPrFlow(item.url);
     const finishedAt = new Date().toISOString();
 
-    // Registrar en bitácora
     logPrResult({
       prNumber: prInfo.prNumber,
       repo: prInfo.repo,
@@ -58,7 +56,6 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
       finishedAt,
     });
 
-    // Cerrar browser al terminar este PR
     logger.info("[Bot] Cerrando browser después de procesar PR");
     await awsBrowser.close();
 
@@ -71,7 +68,6 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
           `📦 Repo: \`${prInfo.repo}\`\n` +
           `🔢 PR #: \`${prInfo.prNumber}\`\n\n` +
           `*Pasos completados:*\n${stepsText}`,
-        "Markdown",
       );
       await bot.telegram.sendMessage(
         config.telegram.ownerUserId,
@@ -91,25 +87,21 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
           `*Pasos completados:*\n${stepsText}\n\n` +
           `*Error:* \`${result.error}\`\n\n` +
           `⚠️ Revisa el PR manualmente: ${item.url}`,
-        "Markdown",
       );
       throw new Error(result.error);
     }
 
-    // Notificar cuántos quedan en cola
     const remaining = queue.pendingCount;
     if (remaining > 0) {
       await sendToTopic(
         bot.telegram,
         item.chatId,
-        `📋 *${remaining} PR(s) restantes en cola*\n` +
-          `⏳ Procesando el siguiente...`,
-        "Markdown",
+        `📋 *${remaining} PR(s) restantes en cola*\n⏳ Procesando el siguiente...`,
       );
     }
   });
 
-  // /status — incluye estado de la cola
+  // /status
   bot.command("status", async (ctx) => {
     const queueSummary = queue.getSummary();
     await ctx.reply(
@@ -118,15 +110,15 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
         `📡 Monitoreando URLs de CodeCommit\n\n` +
         `*Cola de PRs:*\n${queueSummary}\n\n` +
         `Comandos:\n` +
-        `/status \\- Ver estado y cola\n` +
-        `/queue \\- Ver cola de PRs\n` +
-        `/log \\- Ver bitácora de PRs\n` +
-        `/pr <url> \\- Procesar PR manualmente`,
-      { parse_mode: "MarkdownV2", message_thread_id: config.telegram.topicId },
+        `/status - Ver estado y cola\n` +
+        `/queue - Ver cola de PRs\n` +
+        `/log - Ver bitácora de PRs\n` +
+        `/pr <url> - Procesar PR manualmente`,
+      { parse_mode: "Markdown", message_thread_id: config.telegram.topicId },
     );
   });
 
-  // /queue — ver cola
+  // /queue
   bot.command("queue", async (ctx) => {
     const summary = queue.getSummary();
     await ctx.reply(`📋 *Cola de PRs*\n\n${summary}`, {
@@ -135,7 +127,7 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
     });
   });
 
-  // /log — ver bitácora de PRs recientes
+  // /log
   bot.command("log", async (ctx) => {
     const logs = getRecentLogs(5);
     await ctx.reply(`📒 *Bitácora de PRs (últimos 5)*\n\n\`\`\`\n${logs}\n\`\`\``, {
@@ -144,7 +136,7 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
     });
   });
 
-  // /pr <url> — procesar PR manualmente (solo owner)
+  // /pr <url>
   bot.command("pr", async (ctx) => {
     if (ctx.from?.id !== config.telegram.ownerUserId) {
       await ctx.reply("⛔ No tienes permisos para usar este comando.");
@@ -187,7 +179,7 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
     }
   });
 
-  // Escuchar mensajes de canales/grupos con URLs de PR
+  // Escuchar mensajes con URLs de PR
   bot.on(message("text"), async (ctx) => {
     const text = ctx.message.text;
     const chatType = ctx.chat.type;
@@ -230,20 +222,20 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
     if (added.length > 0) {
       const current = queue.currentItem;
       const prList = added
-        .map((p) => `  • PR \\#${p.prNumber} \\(${p.repo}\\)`)
+        .map((p) => `  • PR #${p.prNumber} (${p.repo})`)
         .join("\n");
 
-      let msg = `🔍 *${added.length} PR\\(s\\) detectados*\n\n${prList}\n\n`;
+      let msg = `🔍 *${added.length} PR(s) detectados*\n\n${prList}\n\n`;
 
       if (current && current.prNumber !== added[0].prNumber) {
         msg +=
-          `▶️ Actualmente procesando: PR \\#${current.prNumber}\n` +
+          `▶️ Actualmente procesando: PR #${current.prNumber}\n` +
           `📋 Total en cola: ${queue.pendingCount}`;
       } else {
-        msg += `⏳ Iniciando proceso de autorización\\.\\.\\.`;
+        msg += `⏳ Iniciando proceso de autorización...`;
       }
 
-      await sendToTopic(bot.telegram, ctx.chat.id, msg, "MarkdownV2");
+      await sendToTopic(bot.telegram, ctx.chat.id, msg);
     }
 
     if (duplicates.length > 0) {

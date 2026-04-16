@@ -76,6 +76,15 @@ export class AWSBrowser {
   }
 
   async close(): Promise<void> {
+    // Guardar sesión antes de cerrar para reutilizarla después
+    if (this.context) {
+      try {
+        await this.context.storageState({ path: config.sessionFile });
+        logger.info("[AWS] 💾 Sesión guardada antes de cerrar browser");
+      } catch (e) {
+        logger.warn(`[AWS] No se pudo guardar sesión al cerrar: ${e}`);
+      }
+    }
     await this.browser?.close();
     this.browser = null;
     this.context = null;
@@ -199,11 +208,22 @@ export class AWSBrowser {
 
   private async isLoggedIn(): Promise<boolean> {
     try {
+      logger.info("[AWS] Verificando sesión activa...");
       await this.pg.goto("https://console.aws.amazon.com/console/home", {
-        waitUntil: "networkidle",
-        timeout: 15_000,
+        waitUntil: "domcontentloaded",
+        timeout: 20_000,
       });
-      return !this.pg.url().includes("signin");
+      // Esperar a que la página resuelva (redirect a signin o quede en console)
+      await this.sleep(5_000);
+      const url = this.pg.url();
+      const loggedIn = !url.includes("signin");
+      if (loggedIn) {
+        logger.info("[AWS] ✅ Sesión activa detectada, saltando login");
+        await this.dismissPopups();
+      } else {
+        logger.info("[AWS] ❌ No hay sesión activa, se requiere login");
+      }
+      return loggedIn;
     } catch {
       return false;
     }
