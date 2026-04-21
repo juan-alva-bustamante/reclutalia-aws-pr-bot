@@ -1,4 +1,4 @@
-import { Telegraf } from "telegraf";
+import { Telegraf, Markup } from "telegraf";
 import { message } from "telegraf/filters";
 import { config } from "../config.js";
 import { logger } from "../logger.js";
@@ -33,21 +33,26 @@ function isAuthorized(username: string | undefined): boolean {
   );
 }
 
-/** Envía el mensaje de solicitud de aprobación para un PR */
+/** Envía el mensaje de solicitud de aprobación con botones inline */
 async function sendApprovalRequest(
   telegram: Telegraf["telegram"],
   chatId: number | string,
   prInfo: PrInfo,
 ): Promise<void> {
-  await sendToTopic(
-    telegram,
+  await telegram.sendMessage(
     chatId,
     `🔔 *Solicitud de aprobación*\n\n` +
       `📦 Repo: \`${prInfo.repo}\`\n` +
       `🔢 PR #: \`${prInfo.prNumber}\`\n\n` +
-      `¿Aprobar este PR?\n` +
-      `Responde *si #${prInfo.prNumber}* o *no #${prInfo.prNumber}*\n\n` +
-      `_(Si solo hay 1 PR pendiente, basta con "si" o "no")_`,
+      `¿Aprobar este PR?`,
+    {
+      parse_mode: "Markdown",
+      message_thread_id: config.telegram.topicId,
+      ...Markup.inlineKeyboard([
+        Markup.button.callback("✅ Aprobar", `approve:${prInfo.prNumber}`),
+        Markup.button.callback("❌ Rechazar", `reject:${prInfo.prNumber}`),
+      ]),
+    },
   );
 }
 
@@ -119,6 +124,57 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
         `🔔 *${awaiting.length} PR(s) esperando aprobación:*\n${list}\n\n` +
           `Responde *si #NUMERO* o *no #NUMERO*`,
       );
+    }
+  });
+
+  // ── Callback de botones inline (Aprobar / Rechazar) ──
+  bot.action(/^approve:(\d+)$/, async (ctx) => {
+    const prNumber = ctx.match[1];
+    const username = ctx.from?.username;
+
+    if (!isAuthorized(username)) {
+      await ctx.answerCbQuery("⛔ No estás autorizado para aprobar PRs.");
+      return;
+    }
+
+    const item = queue.approve(prNumber, username ?? "unknown");
+    if (item) {
+      await ctx.answerCbQuery(`✅ PR #${prNumber} aprobado`);
+      // Editar el mensaje original para mostrar quién aprobó
+      await ctx.editMessageText(
+        ctx.callbackQuery.message && "text" in ctx.callbackQuery.message
+          ? ctx.callbackQuery.message.text + `\n\n✅ *Aprobado* por @${username}`
+          : `✅ PR #${prNumber} aprobado por @${username}`,
+        { parse_mode: "Markdown" },
+      );
+      await sendToTopic(bot.telegram, ctx.callbackQuery.message?.chat.id ?? config.telegram.chatId,
+        `✅ PR #${prNumber} *aprobado* por @${username}\n⏳ Iniciando proceso...`,
+      );
+    } else {
+      await ctx.answerCbQuery(`⚠️ PR #${prNumber} ya no está esperando aprobación.`);
+    }
+  });
+
+  bot.action(/^reject:(\d+)$/, async (ctx) => {
+    const prNumber = ctx.match[1];
+    const username = ctx.from?.username;
+
+    if (!isAuthorized(username)) {
+      await ctx.answerCbQuery("⛔ No estás autorizado para rechazar PRs.");
+      return;
+    }
+
+    const item = queue.reject(prNumber, username ?? "unknown");
+    if (item) {
+      await ctx.answerCbQuery(`🚫 PR #${prNumber} rechazado`);
+      await ctx.editMessageText(
+        ctx.callbackQuery.message && "text" in ctx.callbackQuery.message
+          ? ctx.callbackQuery.message.text + `\n\n🚫 *Rechazado* por @${username}`
+          : `🚫 PR #${prNumber} rechazado por @${username}`,
+        { parse_mode: "Markdown" },
+      );
+    } else {
+      await ctx.answerCbQuery(`⚠️ PR #${prNumber} ya no está esperando aprobación.`);
     }
   });
 
