@@ -14,6 +14,10 @@ export const config = {
     topicId: process.env.TELEGRAM_TOPIC_ID
       ? Number(process.env.TELEGRAM_TOPIC_ID)
       : undefined,
+    authorizedUsers: (process.env.TELEGRAM_AUTHORIZED_USERS ?? "")
+      .split(",")
+      .map((u) => u.trim().toLowerCase())
+      .filter((u) => u.length > 0),
   },
   aws: {
     loginUrl: required("AWS_LOGIN_URL"),

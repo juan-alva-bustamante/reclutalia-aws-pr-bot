@@ -22,8 +22,9 @@ export interface QueueItem {
   url: string;
   repo: string;
   prNumber: string;
-  status: "pending" | "processing" | "done" | "error";
+  status: "awaiting_approval" | "pending" | "processing" | "done" | "error" | "rejected";
   addedAt: string;
   chatId: number;
+  approvedBy?: string;
   error?: string;
 }
