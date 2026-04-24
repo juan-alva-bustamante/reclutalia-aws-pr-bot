@@ -690,28 +690,47 @@ export class AWSBrowser {
 
   private async selectThreeWayMerge(): Promise<boolean> {
     logger.info("[AWS] Seleccionando 3-way merge...");
-    const selected = await this.pg.evaluate(() => {
+
+    // Estrategia 1: Click en el tile container de AWS UI
+    const clickedTile = await this.pg.evaluate(() => {
+      // El tile container tiene data-value="THREE_WAY_MERGE"
+      const tile = document.querySelector<HTMLElement>('[data-value="THREE_WAY_MERGE"]');
+      if (tile && tile.offsetParent !== null) {
+        tile.click();
+        return "tile-container";
+      }
+      // Click en el label "3-way merge"
+      const labels = Array.from(document.querySelectorAll<HTMLElement>("span, label"));
+      for (const el of labels) {
+        if (el.textContent?.trim() === "3-way merge" && el.offsetParent !== null) {
+          (el as HTMLElement).click();
+          return "label";
+        }
+      }
+      // Click en el radio input directamente + dispatch change
       const radios = Array.from(
-        document.querySelectorAll<HTMLInputElement>(
-          'input[type="radio"][name="merge-strategies"]',
-        ),
+        document.querySelectorAll<HTMLInputElement>('input[type="radio"]'),
       );
       for (const r of radios) {
         if (r.value === "THREE_WAY_MERGE") {
           r.click();
-          return true;
+          r.checked = true;
+          r.dispatchEvent(new Event("change", { bubbles: true }));
+          r.dispatchEvent(new Event("input", { bubbles: true }));
+          return "radio-input";
         }
       }
-      return false;
+      return null;
     });
 
-    if (selected) {
-      logger.info("[AWS] ✅ 3-way merge seleccionado");
+    if (clickedTile) {
+      logger.info(`[AWS] ✅ 3-way merge seleccionado via ${clickedTile}`);
       return true;
     }
 
-    // Playwright fallback
+    // Estrategia 2: Playwright locators
     for (const sel of [
+      "[data-value='THREE_WAY_MERGE']",
       "text=3-way merge",
       "[aria-label*='3-way']",
       "label:has-text('3-way')",
@@ -728,6 +747,7 @@ export class AWSBrowser {
         /* next */
       }
     }
+
     logger.error("[AWS] ❌ No se pudo seleccionar 3-way merge");
     return false;
   }
