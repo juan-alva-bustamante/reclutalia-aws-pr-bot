@@ -11,16 +11,29 @@ import type { PrInfo, QueueItem } from "../types.js";
 const APPROVE_WORDS = ["si", "sí", "autorizar"];
 const REJECT_WORDS = ["no", "denegar"];
 
+/** Helper — envía mensaje al topic. Si falla el formato, reintenta sin Markdown */
 async function sendToTopic(
   telegram: Telegraf["telegram"],
   chatId: number | string,
   text: string,
-  parseMode: "Markdown" | "MarkdownV2" = "Markdown",
+  parseMode: "Markdown" | "MarkdownV2" | undefined = "Markdown",
 ): Promise<void> {
-  await telegram.sendMessage(chatId, text, {
-    parse_mode: parseMode,
-    message_thread_id: config.telegram.topicId,
-  });
+  try {
+    await telegram.sendMessage(chatId, text, {
+      parse_mode: parseMode,
+      message_thread_id: config.telegram.topicId,
+    });
+  } catch (e) {
+    // Si falla por Markdown, reintentar sin formato
+    logger.warn(`[Bot] Error enviando mensaje con Markdown, reintentando sin formato: ${e}`);
+    try {
+      await telegram.sendMessage(chatId, text.replace(/[*`_]/g, ""), {
+        message_thread_id: config.telegram.topicId,
+      });
+    } catch (e2) {
+      logger.error(`[Bot] Error enviando mensaje sin formato: ${e2}`);
+    }
+  }
 }
 
 function isAuthorized(username: string | undefined): boolean {
@@ -66,13 +79,15 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
     const startedAt = new Date().toISOString();
     const approver = item.approvedBy?.toLowerCase();
     const authorInfo = approver ? config.userProfiles[approver] : undefined;
+    // Escapar _ en username para Markdown
+    const approverDisplay = (item.approvedBy ?? "unknown").replace(/_/g, "\\_");
+    const authorDisplay = authorInfo ? ` (${authorInfo.name})` : "";
 
     // Mensaje 2: Procesando
     await sendToTopic(bot.telegram, item.chatId,
       `⏳ *Procesando PR #${prInfo.prNumber}*\n` +
         `📦 Repo: \`${prInfo.repo}\`\n` +
-        `👤 Aprobado por: @${item.approvedBy ?? "unknown"}` +
-        (authorInfo ? ` (${authorInfo.name})` : ""),
+        `👤 Aprobado por: @${approverDisplay}${authorDisplay}`,
     );
 
     const result = await awsBrowser.fullPrFlow(item.url, authorInfo);
@@ -95,12 +110,11 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
       await sendToTopic(bot.telegram, item.chatId,
         `✅ *PR #${prInfo.prNumber} mergeado exitosamente*\n` +
           `📦 Repo: \`${prInfo.repo}\`\n` +
-          `👤 Por: @${item.approvedBy ?? "unknown"}`,
+          `👤 Por: @${approverDisplay}`,
       );
       await bot.telegram.sendMessage(config.telegram.ownerUserId,
-        `✅ PR #${prInfo.prNumber} del repo \`${prInfo.repo}\` mergeado por @${item.approvedBy ?? "unknown"}.`,
-        { parse_mode: "Markdown" },
-      );
+        `✅ PR #${prInfo.prNumber} del repo ${prInfo.repo} mergeado por @${item.approvedBy ?? "unknown"}.`,
+      ).catch((e) => logger.warn(`[Bot] Error enviando DM al owner: ${e}`));
     } else {
       await sendToTopic(bot.telegram, item.chatId,
         `❌ *Error en PR #${prInfo.prNumber}*\n` +
