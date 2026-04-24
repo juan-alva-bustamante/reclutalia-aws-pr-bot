@@ -1,0 +1,16 @@
+ahora ayudame a meter una mejora para la aprobacion, la aprobacion de PR en telegram la pueden hacer 4 usuarios:
+Nombre - Usuario Telegram - Correo
+Gabriel Barba - @gabrielbarba28 - gabriel.barba@elektra.com.mx
+Juan Carlos Lievano - @JcLievano - juan.lievano@tecnologiaaccionable.mx
+Felipe Guadarrama - @el_chambas3000 - felipe.guadarramah@elektra.com.mx
+
+En funcion de quien acepte el PR , necesito que en el historial se guarde que usuario lo aprobo y en los inputs de aws donde se ingresa el AWS_AUTHOR_NAME y AWS_AUTHOR_EMAIL, se ponga el del usuraio que aprobo el PR en telegram, ayudame con esta modificacion
+
+Ahora ayudame a reducir los mensajes, hoy en dia se mandan 4 mensajes para aprobar un PR
+- solicitud de aprobacion
+- Procesando PR
+- Iniciando proceso
+- Proceso terminado
+
+Solo necesito 3, solicitud, procesando y exito o error, ayudame a no enviar tantos mensajes
+Mas el mensaje si se aprueba un mensaje mientras otro esta siendo procesado, mensaje de que hay un pr en cola

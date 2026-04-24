@@ -5,6 +5,12 @@ export interface PrInfo {
   url: string;
 }
 
+/** Información del autor para el merge en AWS */
+export interface AuthorInfo {
+  name: string;
+  email: string;
+}
+
 /** Resultado del flujo completo de PR */
 export interface PrFlowResult {
   success: boolean;

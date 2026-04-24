@@ -13,6 +13,9 @@ export interface PrLogEntry {
   error?: string;
   startedAt: string;
   finishedAt: string;
+  approvedBy?: string;
+  authorName?: string;
+  authorEmail?: string;
 }
 
 /** Registra un PR completado (exitoso o con error) en la bitácora */
@@ -23,6 +26,7 @@ export function logPrResult(entry: PrLogEntry): void {
     `${statusIcon} PR #${entry.prNumber} — ${entry.repo}`,
     `   Estado:    ${entry.status === "success" ? "COMPLETADO" : "ERROR"}`,
     `   URL:       ${entry.url}`,
+    `   Aprobado:  @${entry.approvedBy ?? "N/A"} (${entry.authorName ?? "N/A"} <${entry.authorEmail ?? "N/A"}>)`,
     `   Inicio:    ${entry.startedAt}`,
     `   Fin:       ${entry.finishedAt}`,
   ];

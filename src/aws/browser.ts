@@ -462,7 +462,7 @@ export class AWSBrowser {
 
   // ── Merge PR ───────────────────────────────────────────────
 
-  private async mergePr(prUrl: string): Promise<boolean> {
+  private async mergePr(prUrl: string, author?: { name: string; email: string }): Promise<boolean> {
     logger.info(`[AWS] Navegando al PR para MERGE: ${prUrl}`);
     try {
       await this.navigateAndWait(prUrl, { timeout: 60_000 });
@@ -492,7 +492,7 @@ export class AWSBrowser {
       await this.sleep(2_000);
 
       // Llenar Author name y Email
-      await this.fillMergeAuthorFields();
+      await this.fillMergeAuthorFields(author);
       await this.sleep(2_000);
 
       // Asegurar que "Delete source branch" NO esté marcado
@@ -523,16 +523,9 @@ export class AWSBrowser {
   private async clickMergeButton(): Promise<boolean> {
     const clicked = await this.pg.evaluate(() => {
       const excludeAncestors = [
-        "nav",
-        "header",
-        "[id*='nav']",
-        "[id*='menu']",
-        "[role='navigation']",
-        "[role='menu']",
-        "[role='menubar']",
-        "[class*='navbar']",
-        "[class*='header']",
-        "[id*='awsc-']",
+        "[id^='awsc-']",
+        "#aws-nav-header",
+        "[id='awsui-dropdown']",
       ].join(", ");
 
       const buttons = Array.from(document.querySelectorAll("button"));
@@ -657,8 +650,9 @@ export class AWSBrowser {
     }
   }
 
-  private async fillMergeAuthorFields(): Promise<void> {
-    const { authorName, authorEmail } = config.aws;
+  private async fillMergeAuthorFields(author?: { name: string; email: string }): Promise<void> {
+    const authorName = author?.name ?? config.aws.authorName;
+    const authorEmail = author?.email ?? config.aws.authorEmail;
 
     logger.info(`[AWS] Llenando Author name: ${authorName}`);
     const authorOk = await this.fillReactInput("#awsui-input-0", authorName);
@@ -711,16 +705,9 @@ export class AWSBrowser {
 
     const clicked = await this.pg.evaluate(() => {
       const excludeAncestors = [
-        "nav",
-        "header",
-        "[id*='nav']",
-        "[id*='menu']",
-        "[role='navigation']",
-        "[role='menu']",
-        "[role='menubar']",
-        "[class*='navbar']",
-        "[class*='header']",
-        "[id*='awsc-']",
+        "[id^='awsc-']",
+        "#aws-nav-header",
+        "[id='awsui-dropdown']",
       ].join(", ");
 
       const buttons = Array.from(document.querySelectorAll("button"));
@@ -787,7 +774,7 @@ export class AWSBrowser {
 
   // ── Full PR Flow ───────────────────────────────────────────
 
-  async fullPrFlow(prUrl: string): Promise<PrFlowResult> {
+  async fullPrFlow(prUrl: string, author?: { name: string; email: string }): Promise<PrFlowResult> {
     const result: PrFlowResult = { success: false, steps: [] };
 
     try {
@@ -832,7 +819,7 @@ export class AWSBrowser {
         result.error = "Falló switch a MergeMaster";
         return result;
       }
-      if (!(await this.mergePr(prUrl))) {
+      if (!(await this.mergePr(prUrl, author))) {
         result.error = "Falló el merge con MergeMaster";
         return result;
       }
@@ -865,31 +852,31 @@ export class AWSBrowser {
     logger.info(`[AWS] ⏳ Esperando botón '${buttonText}'...`);
 
     while (Date.now() < deadline) {
+      // Primero loguear qué botones hay visibles en la página
+      const allButtons = await this.pg.evaluate(() => {
+        return Array.from(document.querySelectorAll("button"))
+          .filter((btn) => btn.offsetParent !== null)
+          .map((btn) => (btn.innerText || btn.textContent || "").trim())
+          .filter((t) => t.length > 0 && t.length < 50);
+      });
+      logger.info(`[AWS] Botones visibles: ${JSON.stringify(allButtons.slice(0, 15))}`);
+
       const result = await this.pg.evaluate((textLower) => {
-        // Selectores del header/nav de AWS que debemos ignorar
+        // Solo excluir el top-bar de AWS (id awsc-*) y dropdowns del sistema
         const excludeAncestors = [
-          "nav",
-          "header",
-          "[id*='nav']",
-          "[id*='menu']",
-          "[role='navigation']",
-          "[role='menu']",
-          "[role='menubar']",
-          "[class*='navbar']",
-          "[class*='header']",
-          "[id*='awsc-']",
+          "[id^='awsc-']",
+          "#aws-nav-header",
+          "[id='awsui-dropdown']",
         ].join(", ");
 
         const buttons = Array.from(document.querySelectorAll("button"));
 
         for (const btn of buttons) {
-          // Ignorar botones dentro del header/nav de AWS
           if (btn.closest(excludeAncestors)) continue;
 
           const text = (btn.innerText || btn.textContent || "").trim();
           const textLc = text.toLowerCase();
 
-          // Solo match exacto
           if (
             textLc === textLower &&
             btn.offsetParent !== null &&

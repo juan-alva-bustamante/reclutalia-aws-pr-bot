@@ -19,6 +19,13 @@ export const config = {
       .map((u) => u.trim().toLowerCase())
       .filter((u) => u.length > 0),
   },
+  /** Mapeo de username de Telegram → datos de autor para el merge en AWS */
+  userProfiles: {
+    gabrielbarba28: { name: "Gabriel Barba", email: "gabriel.barba@elektra.com.mx" },
+    jclievano: { name: "Juan Carlos Lievano", email: "juan.lievano@tecnologiaaccionable.mx" },
+    el_chambas3000: { name: "Felipe Guadarrama", email: "felipe.guadarramah@elektra.com.mx" },
+    juanalva997: { name: "Juan Alva Bustamante", email: "juan.alva@elektra.com.mx" },
+  } as Record<string, { name: string; email: string }>,
   aws: {
     loginUrl: required("AWS_LOGIN_URL"),
     accountId: process.env.AWS_ACCOUNT_ID ?? "",

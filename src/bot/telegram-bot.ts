@@ -8,11 +8,9 @@ import { logPrResult, getRecentLogs } from "../queue/pr-log.js";
 import type { AWSBrowser } from "../aws/browser.js";
 import type { PrInfo, QueueItem } from "../types.js";
 
-// Respuestas válidas de aprobación/rechazo
 const APPROVE_WORDS = ["si", "sí", "autorizar"];
 const REJECT_WORDS = ["no", "denegar"];
 
-/** Helper to send a message to the configured topic */
 async function sendToTopic(
   telegram: Telegraf["telegram"],
   chatId: number | string,
@@ -25,7 +23,6 @@ async function sendToTopic(
   });
 }
 
-/** Verifica si un username está en la lista de autorizados */
 function isAuthorized(username: string | undefined): boolean {
   if (!username) return false;
   return config.telegram.authorizedUsers.some(
@@ -33,7 +30,6 @@ function isAuthorized(username: string | undefined): boolean {
   );
 }
 
-/** Envía el mensaje de solicitud de aprobación con botones inline */
 async function sendApprovalRequest(
   telegram: Telegraf["telegram"],
   chatId: number | string,
@@ -44,12 +40,11 @@ async function sendApprovalRequest(
     `🔔 *Solicitud de aprobación*\n\n` +
       `📦 Repo: \`${prInfo.repo}\`\n` +
       `🔢 PR #: \`${prInfo.prNumber}\`\n\n` +
-      `Antes de Aprobar se recomenda abrir el PR y validar los siguientes puntos: \n\n` +
-      `▸ Ramas del PR (init-dev, dev-qa, qa-master) \n` +
-      `▸ Quien manda el PR \n` +
-      `▸ Cambios incluidos en este PR \n\n` +
-      `Despues de validar estos puntos, \n` +
-      `⁉ ¿Estás seguro que quieres Aprobar este PR? \n\n`,
+      `Antes de Aprobar se recomienda validar:\n` +
+      `▸ Ramas del PR (init-dev, dev-qa, qa-master)\n` +
+      `▸ Quien manda el PR\n` +
+      `▸ Cambios incluidos\n\n` +
+      `⁉ ¿Aprobar este PR?`,
     {
       parse_mode: "Markdown",
       message_thread_id: config.telegram.topicId,
@@ -65,97 +60,66 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
   const bot = new Telegraf(config.telegram.token);
   const queue = new PrQueue();
 
-  // ── Procesador de la cola (se ejecuta cuando un PR es aprobado) ──
+  // ── Procesador: solo 2 mensajes (procesando + resultado) ──
   queue.setProcessor(async (item: QueueItem) => {
-    const prInfo: PrInfo = {
-      repo: item.repo,
-      prNumber: item.prNumber,
-      url: item.url,
-    };
+    const prInfo: PrInfo = { repo: item.repo, prNumber: item.prNumber, url: item.url };
     const startedAt = new Date().toISOString();
+    const approver = item.approvedBy?.toLowerCase();
+    const authorInfo = approver ? config.userProfiles[approver] : undefined;
 
-    await sendToTopic(
-      bot.telegram,
-      item.chatId,
-      `▶️ *Procesando PR #${prInfo.prNumber}*\n` +
-        `📦 Repo: \`${prInfo.repo}\`\n\n` +
-        `⏳ Iniciando proceso de autorización...`,
+    // Mensaje 2: Procesando
+    await sendToTopic(bot.telegram, item.chatId,
+      `⏳ *Procesando PR #${prInfo.prNumber}*\n` +
+        `📦 Repo: \`${prInfo.repo}\`\n` +
+        `👤 Aprobado por: @${item.approvedBy ?? "unknown"}` +
+        (authorInfo ? ` (${authorInfo.name})` : ""),
     );
 
-    const result = await awsBrowser.fullPrFlow(item.url);
+    const result = await awsBrowser.fullPrFlow(item.url, authorInfo);
     const finishedAt = new Date().toISOString();
 
     logPrResult({
-      prNumber: prInfo.prNumber,
-      repo: prInfo.repo,
-      url: item.url,
+      prNumber: prInfo.prNumber, repo: prInfo.repo, url: item.url,
       status: result.success ? "success" : "error",
-      steps: result.steps,
-      error: result.error,
-      startedAt,
-      finishedAt,
+      steps: result.steps, error: result.error,
+      startedAt, finishedAt,
+      approvedBy: item.approvedBy,
+      authorName: authorInfo?.name, authorEmail: authorInfo?.email,
     });
 
     logger.info("[Bot] Cerrando browser después de procesar PR");
     await awsBrowser.close();
 
+    // Mensaje 3: Resultado
     if (result.success) {
-      const stepsText = result.steps.join("\n");
-      await sendToTopic(
-        bot.telegram,
-        item.chatId,
-        `✅ *PR procesado exitosamente*\n\n` +
+      await sendToTopic(bot.telegram, item.chatId,
+        `✅ *PR #${prInfo.prNumber} mergeado exitosamente*\n` +
           `📦 Repo: \`${prInfo.repo}\`\n` +
-          `🔢 PR #: \`${prInfo.prNumber}\`\n\n` +
-          `*Pasos completados:*\n${stepsText}`,
+          `👤 Por: @${item.approvedBy ?? "unknown"}`,
       );
-      await bot.telegram.sendMessage(
-        config.telegram.ownerUserId,
-        `✅ PR #${prInfo.prNumber} del repo \`${prInfo.repo}\` fue mergeado exitosamente.`,
+      await bot.telegram.sendMessage(config.telegram.ownerUserId,
+        `✅ PR #${prInfo.prNumber} del repo \`${prInfo.repo}\` mergeado por @${item.approvedBy ?? "unknown"}.`,
         { parse_mode: "Markdown" },
       );
     } else {
-      const stepsText = result.steps.length
-        ? result.steps.join("\n")
-        : "Ninguno";
-      await sendToTopic(
-        bot.telegram,
-        item.chatId,
-        `❌ *Error procesando PR*\n\n` +
+      await sendToTopic(bot.telegram, item.chatId,
+        `❌ *Error en PR #${prInfo.prNumber}*\n` +
           `📦 Repo: \`${prInfo.repo}\`\n` +
-          `🔢 PR #: \`${prInfo.prNumber}\`\n\n` +
-          `*Pasos completados:*\n${stepsText}\n\n` +
           `*Error:* \`${result.error}\`\n\n` +
-          `⚠️ Revisa el PR manualmente: ${item.url}`,
+          `⚠️ Revisa manualmente: ${item.url}`,
       );
       throw new Error(result.error);
     }
 
-    const remaining = queue.pendingCount;
-    if (remaining > 0) {
-      await sendToTopic(
-        bot.telegram,
-        item.chatId,
-        `📋 *${remaining} PR(s) restantes en cola*\n⏳ Procesando el siguiente...`,
-      );
-    }
-
-    // Si hay PRs esperando aprobación, recordar
-    const awaiting = queue.awaitingApproval;
-    if (awaiting.length > 0) {
-      const list = awaiting
-        .map((p) => `  • PR #${p.prNumber} (${p.repo})`)
-        .join("\n");
-      await sendToTopic(
-        bot.telegram,
-        item.chatId,
-        `🔔 *${awaiting.length} PR(s) esperando aprobación:*\n${list}\n\n` +
-          `Responde *si #NUMERO* o *no #NUMERO*`,
+    // Solo si hay más PRs aprobados en cola
+    if (queue.pendingCount > 0) {
+      await sendToTopic(bot.telegram, item.chatId,
+        `📋 ${queue.pendingCount} PR(s) en cola, procesando siguiente...`,
       );
     }
   });
 
-  // ── Callback de botones inline (Aprobar / Rechazar) ──
+  // ── Botones inline: solo editan el mensaje original, no envían nuevo ──
   bot.action(/^approve:(\d+)$/, async (ctx) => {
     const prNumber = ctx.match[1];
     const username = ctx.from?.username;
@@ -168,23 +132,21 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
     const item = queue.approve(prNumber, username ?? "unknown");
     if (item) {
       await ctx.answerCbQuery(`✅ PR #${prNumber} aprobado`);
-      // Editar el mensaje original para mostrar quién aprobó
+      const original = ctx.callbackQuery.message && "text" in ctx.callbackQuery.message
+        ? ctx.callbackQuery.message.text : "";
       await ctx.editMessageText(
-        ctx.callbackQuery.message && "text" in ctx.callbackQuery.message
-          ? ctx.callbackQuery.message.text +
-              `\n\n✅ *Aprobado* por @${username}`
-          : `✅ PR #${prNumber} aprobado por @${username}`,
+        original + `\n\n✅ *Aprobado por @${username}*`,
         { parse_mode: "Markdown" },
       );
-      await sendToTopic(
-        bot.telegram,
-        ctx.callbackQuery.message?.chat.id ?? config.telegram.chatId,
-        `✅ PR #${prNumber} *aprobado* por @${username}\n⏳ Iniciando proceso...`,
-      );
+      // Si hay otro PR procesándose, notificar que este queda en cola
+      if (queue.currentItem) {
+        await sendToTopic(bot.telegram,
+          ctx.callbackQuery.message?.chat.id ?? config.telegram.chatId,
+          `📋 PR #${prNumber} aprobado, en cola (procesando PR #${queue.currentItem.prNumber})`,
+        );
+      }
     } else {
-      await ctx.answerCbQuery(
-        `⚠️ PR #${prNumber} ya no está esperando aprobación.`,
-      );
+      await ctx.answerCbQuery(`⚠️ PR #${prNumber} ya no está esperando aprobación.`);
     }
   });
 
@@ -200,71 +162,48 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
     const item = queue.reject(prNumber, username ?? "unknown");
     if (item) {
       await ctx.answerCbQuery(`🚫 PR #${prNumber} rechazado`);
+      const original = ctx.callbackQuery.message && "text" in ctx.callbackQuery.message
+        ? ctx.callbackQuery.message.text : "";
       await ctx.editMessageText(
-        ctx.callbackQuery.message && "text" in ctx.callbackQuery.message
-          ? ctx.callbackQuery.message.text +
-              `\n\n🚫 *Rechazado* por @${username}`
-          : `🚫 PR #${prNumber} rechazado por @${username}`,
+        original + `\n\n🚫 *Rechazado por @${username}*`,
         { parse_mode: "Markdown" },
       );
     } else {
-      await ctx.answerCbQuery(
-        `⚠️ PR #${prNumber} ya no está esperando aprobación.`,
-      );
+      await ctx.answerCbQuery(`⚠️ PR #${prNumber} ya no está esperando aprobación.`);
     }
   });
 
   // ── Comandos ──
-
   bot.command("status", async (ctx) => {
-    const queueSummary = queue.getSummary();
     await ctx.reply(
-      `🤖 *Bot de PR Autorización*\n\n` +
-        `✅ Activo y escuchando\n📡 Monitoreando URLs de CodeCommit\n\n` +
-        `*Cola de PRs:*\n${queueSummary}\n\n` +
-        `Comandos:\n/status - Estado y cola\n/queue - Cola de PRs\n/log - Bitácora\n/pr <url> - PR manual`,
+      `🤖 *Bot de PR Autorización*\n\n✅ Activo\n\n*Cola:*\n${queue.getSummary()}\n\n` +
+        `/status /queue /log /pr <url>`,
       { parse_mode: "Markdown", message_thread_id: config.telegram.topicId },
     );
   });
 
   bot.command("queue", async (ctx) => {
     await ctx.reply(`📋 *Cola de PRs*\n\n${queue.getSummary()}`, {
-      parse_mode: "Markdown",
-      message_thread_id: config.telegram.topicId,
+      parse_mode: "Markdown", message_thread_id: config.telegram.topicId,
     });
   });
 
   bot.command("log", async (ctx) => {
-    const logs = getRecentLogs(5);
-    await ctx.reply(`📒 *Bitácora (últimos 5)*\n\n\`\`\`\n${logs}\n\`\`\``, {
-      parse_mode: "Markdown",
-      message_thread_id: config.telegram.topicId,
+    await ctx.reply(`📒 *Bitácora (últimos 5)*\n\n\`\`\`\n${getRecentLogs(5)}\n\`\`\``, {
+      parse_mode: "Markdown", message_thread_id: config.telegram.topicId,
     });
   });
 
   bot.command("pr", async (ctx) => {
     if (!isAuthorized(ctx.from?.username)) {
-      await ctx.reply("⛔ No tienes permisos para usar este comando.");
-      return;
+      await ctx.reply("⛔ No tienes permisos."); return;
     }
     const url = ctx.message.text.split(" ")[1];
-    if (!url) {
-      await ctx.reply("Uso: /pr <url_del_pr>");
-      return;
-    }
+    if (!url) { await ctx.reply("Uso: /pr <url>"); return; }
     const prInfo = parsePrInfo(url);
-    if (!prInfo) {
-      await ctx.reply("❌ URL de PR no válida.");
-      return;
-    }
+    if (!prInfo) { await ctx.reply("❌ URL no válida."); return; }
 
-    const added = queue.enqueue({
-      url: prInfo.url,
-      repo: prInfo.repo,
-      prNumber: prInfo.prNumber,
-      chatId: ctx.chat.id,
-    });
-    logger.info(`Enviando mensaje de aprobacion `, ctx);
+    const added = queue.enqueue({ url: prInfo.url, repo: prInfo.repo, prNumber: prInfo.prNumber, chatId: ctx.chat.id });
     if (added) {
       await sendApprovalRequest(bot.telegram, ctx.chat.id, prInfo);
     } else {
@@ -272,115 +211,63 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
     }
   });
 
-  // ── Listener principal de mensajes ──
+  // ── Listener de mensajes (texto) ──
   bot.on(message("text"), async (ctx) => {
     const text = ctx.message.text.trim();
     const chatType = ctx.chat.type;
 
     if (chatType === "private") return;
-    if (
-      config.telegram.topicId &&
-      ctx.message.message_thread_id !== config.telegram.topicId
-    )
-      return;
+    if (config.telegram.topicId && ctx.message.message_thread_id !== config.telegram.topicId) return;
 
-    // ── 1. Verificar si es una respuesta de aprobación/rechazo ──
+    // 1. Respuesta de aprobación/rechazo por texto
     const textLower = text.toLowerCase();
-
-    // Parsear: "si #29426", "no 29426", "autorizar #29426", "si", "no", etc.
     const prNumberMatch = textLower.match(/#?(\d{4,})/);
-    // Extraer la primera palabra (ignorando el número y #)
     const commandPart = textLower.replace(/#?\d+/g, "").trim();
     const firstWord = commandPart.split(/\s+/)[0];
-
     const isApprove = APPROVE_WORDS.includes(firstWord);
     const isReject = REJECT_WORDS.includes(firstWord);
-
-    // Solo procesar si el mensaje es EXACTAMENTE una palabra de aprobación/rechazo
-    // opcionalmente seguida de un número de PR
     const isExactCommand = commandPart === firstWord;
 
     if ((isApprove || isReject) && isExactCommand) {
       if (!isAuthorized(ctx.from?.username)) {
-        await sendToTopic(
-          bot.telegram,
-          ctx.chat.id,
-          `⛔ @${ctx.from?.username ?? "usuario"} no está autorizado para aprobar/rechazar PRs.`,
-        );
+        await sendToTopic(bot.telegram, ctx.chat.id,
+          `⛔ @${ctx.from?.username ?? "usuario"} no autorizado.`);
         return;
       }
 
       const awaiting = queue.awaitingApproval;
-      if (awaiting.length === 0) {
-        await sendToTopic(
-          bot.telegram,
-          ctx.chat.id,
-          `ℹ️ No hay PRs esperando aprobación.`,
-        );
-        return;
-      }
+      if (awaiting.length === 0) return;
 
-      // Determinar qué PR se está aprobando/rechazando
       let targetPrNumber: string | null = null;
-
       if (prNumberMatch) {
-        // Respuesta explícita: "si #29426"
         targetPrNumber = prNumberMatch[1];
       } else if (awaiting.length === 1) {
-        // Solo 1 PR esperando, "si" o "no" aplica a ese
         targetPrNumber = awaiting[0].prNumber;
       } else {
-        // Múltiples PRs esperando, necesita especificar
-        const list = awaiting
-          .map((p) => `  • PR #${p.prNumber} (${p.repo})`)
-          .join("\n");
-        await sendToTopic(
-          bot.telegram,
-          ctx.chat.id,
-          `⚠️ Hay ${awaiting.length} PRs esperando aprobación:\n${list}\n\n` +
-            `Especifica cuál: *si #NUMERO* o *no #NUMERO*`,
-        );
+        const list = awaiting.map((p) => `  • PR #${p.prNumber} (${p.repo})`).join("\n");
+        await sendToTopic(bot.telegram, ctx.chat.id,
+          `⚠️ Hay ${awaiting.length} PRs pendientes:\n${list}\n\nEspecifica: *si #NUMERO*`);
         return;
       }
 
+      const username = ctx.from?.username ?? "unknown";
       if (isApprove) {
-        const username = ctx.from?.username ?? "unknown";
         const item = queue.approve(targetPrNumber, username);
-        if (item) {
-          await sendToTopic(
-            bot.telegram,
-            ctx.chat.id,
-            `✅ PR #${targetPrNumber} *aprobado* por @${ctx.from?.username ?? "usuario"}\n` +
-              `⏳ Iniciando proceso...`,
-          );
-        } else {
-          await sendToTopic(
-            bot.telegram,
-            ctx.chat.id,
-            `⚠️ PR #${targetPrNumber} no está esperando aprobación.`,
-          );
+        if (!item) {
+          await sendToTopic(bot.telegram, ctx.chat.id, `⚠️ PR #${targetPrNumber} no está pendiente.`);
         }
+        // No envía mensaje extra — el procesador ya envía "Procesando"
       } else {
-        const username = ctx.from?.username ?? "unknown";
         const item = queue.reject(targetPrNumber, username);
         if (item) {
-          await sendToTopic(
-            bot.telegram,
-            ctx.chat.id,
-            `🚫 PR #${targetPrNumber} *rechazado* por @${ctx.from?.username ?? "usuario"}`,
-          );
-        } else {
-          await sendToTopic(
-            bot.telegram,
-            ctx.chat.id,
-            `⚠️ PR #${targetPrNumber} no está esperando aprobación.`,
-          );
+          await sendToTopic(bot.telegram, ctx.chat.id,
+            `🚫 PR #${targetPrNumber} *rechazado* por @${username}`);
         }
       }
       return;
     }
 
-    // ── 2. Detectar URLs de PR en el mensaje ──
+    // 2. Detectar URLs de PR
     const prUrls = extractAllPrUrls(text);
     if (prUrls.length === 0) return;
 
@@ -398,23 +285,19 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
 
     for (const prInfo of parsed) {
       const wasAdded = queue.enqueue({
-        url: prInfo.url,
-        repo: prInfo.repo,
-        prNumber: prInfo.prNumber,
-        chatId: ctx.chat.id,
+        url: prInfo.url, repo: prInfo.repo, prNumber: prInfo.prNumber, chatId: ctx.chat.id,
       });
       if (wasAdded) added.push(prInfo);
       else duplicates.push(prInfo);
     }
 
-    // Enviar solicitud de aprobación por cada PR nuevo
     for (const prInfo of added) {
       await sendApprovalRequest(bot.telegram, ctx.chat.id, prInfo);
     }
 
     if (duplicates.length > 0) {
-      const dupList = duplicates.map((p) => `PR #${p.prNumber}`).join(", ");
-      await sendToTopic(bot.telegram, ctx.chat.id, `ℹ️ Ya en cola: ${dupList}`);
+      await sendToTopic(bot.telegram, ctx.chat.id,
+        `ℹ️ Ya en cola: ${duplicates.map((p) => `PR #${p.prNumber}`).join(", ")}`);
     }
   });
 
