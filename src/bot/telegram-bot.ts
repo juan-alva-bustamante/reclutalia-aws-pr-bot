@@ -170,6 +170,13 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
           `*Error:* \`${result.error}\`\n\n` +
           `⚠️ Revisa manualmente: ${item.url}`,
       );
+      // DM al owner con el detalle del error
+      await bot.telegram.sendMessage(config.telegram.ownerUserId,
+        `❌ Error en PR #${prInfo.prNumber} (${prInfo.repo})\n\n` +
+          `Error: ${result.error}\n` +
+          `Pasos completados: ${result.steps.length > 0 ? result.steps.join(", ") : "Ninguno"}\n\n` +
+          `${item.url}`,
+      ).catch((e) => logger.warn(`[Bot] Error enviando DM de error al owner: ${e}`));
       throw new Error(result.error);
     }
 
