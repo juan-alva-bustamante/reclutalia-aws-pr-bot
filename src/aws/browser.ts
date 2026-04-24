@@ -51,6 +51,9 @@ export class AWSBrowser {
   private context: BrowserContext | null = null;
   private page: Page | null = null;
 
+  /** Callback para solicitar MFA por Telegram. Se inyecta desde el bot. */
+  onMfaRequired: (() => Promise<string | null>) | null = null;
+
   // ── Lifecycle ──────────────────────────────────────────────
 
   async start(): Promise<void> {
@@ -340,22 +343,118 @@ export class AWSBrowser {
 
       if (!(await mfaField.isVisible({ timeout: 8_000 }))) return;
 
-      logger.info(
-        "[AWS] 🔐 Pantalla MFA detectada — ingresa tu código en el browser",
-      );
-      logger.info("[AWS] ⏳ Tienes 30 segundos...");
+      logger.info("[AWS] 🔐 Pantalla MFA detectada");
 
-      for (let remaining = 30; remaining > 0; remaining--) {
-        logger.info(`[AWS] ⏱ Esperando MFA... ${remaining}`);
+      // Intentar obtener MFA por Telegram
+      if (this.onMfaRequired) {
+        logger.info("[AWS] Solicitando MFA por Telegram...");
+        const code = await this.onMfaRequired();
+
+        if (code && /^\d{6}$/.test(code)) {
+          logger.info("[AWS] MFA recibido por Telegram, ingresando...");
+
+          // Click en el campo, limpiar y teclear dígito a dígito
+          await mfaField.click();
+          await this.sleep(300);
+          await mfaField.press("Control+a");
+          await mfaField.press("Backspace");
+          await mfaField.type(code, { delay: 80 });
+          await this.sleep(1_000);
+
+          logger.info("[AWS] MFA escrito en el campo, buscando botón submit...");
+
+          // Cerrar modal de feedback si aparece antes del submit
+          await this.dismissFeedbackModal();
+
+          // Submit MFA — probar varios selectores (NO incluir 'Submit' genérico)
+          const submitSelectors = [
+            "#submitMfa_button",
+            "button#submitMfa_button",
+            "button:has-text('Sign in')",
+            "button:has-text('Verify')",
+            "#signin_button",
+          ];
+
+          let submitted = false;
+          for (const sel of submitSelectors) {
+            try {
+              const btn = this.pg.locator(sel).first();
+              if (await btn.isVisible({ timeout: 1_500 })) {
+                logger.info(`[AWS] Click en submit MFA: ${sel}`);
+                await btn.click();
+                submitted = true;
+                break;
+              }
+            } catch {
+              /* next */
+            }
+          }
+
+          // Fallback: buscar button[type='submit'] que NO esté dentro de un modal
+          if (!submitted) {
+            const clicked = await this.pg.evaluate(() => {
+              const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("button[type='submit'], input[type='submit']"));
+              for (const btn of buttons) {
+                if (btn.closest("[role='dialog'], [aria-modal='true'], [class*='modal']")) continue;
+                if (btn.offsetParent !== null && !btn.disabled) {
+                  btn.click();
+                  return true;
+                }
+              }
+              return false;
+            });
+            if (clicked) {
+              logger.info("[AWS] Click en submit MFA via evaluate (excluyendo modales)");
+              submitted = true;
+            }
+          }
+
+          if (!submitted) {
+            logger.info("[AWS] No se encontró botón submit, presionando Enter...");
+            await mfaField.click();
+            await this.pg.keyboard.press("Enter");
+          }
+
+          // Esperar a que la página cambie (salga de la pantalla MFA)
+          logger.info("[AWS] Esperando que la página avance después del MFA...");
+          for (let i = 0; i < 20; i++) {
+            await this.sleep(1_000);
+            const currentUrl = this.pg.url();
+            logger.info(`[AWS] URL post-MFA: ${currentUrl}`);
+            if (
+              currentUrl.includes("console.aws.amazon.com") ||
+              (!currentUrl.includes("mfa") && !currentUrl.includes("signin"))
+            ) {
+              logger.info("[AWS] ✅ MFA aceptado, página avanzó");
+              break;
+            }
+            // Verificar si el campo MFA desapareció
+            if (!(await mfaField.isVisible({ timeout: 500 }))) {
+              logger.info("[AWS] ✅ Campo MFA desapareció, avanzando");
+              break;
+            }
+          }
+
+          await this.pg.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
+          await this.sleep(2_000);
+          await this.dismissFeedbackModal();
+          logger.info("[AWS] ✅ MFA completado por Telegram");
+          return;
+        }
+        logger.warn("[AWS] MFA no recibido o inválido, esperando ingreso manual...");
+      }
+
+      // Fallback: esperar ingreso manual en el browser
+      logger.info("[AWS] ⏳ Esperando MFA manual (60 segundos)...");
+      for (let remaining = 60; remaining > 0; remaining--) {
         await this.sleep(1_000);
-
         const currentUrl = this.pg.url();
         if (
           currentUrl.includes("console.aws.amazon.com") ||
           !currentUrl.toLowerCase().includes("mfa")
         ) {
           if (!(await mfaField.isVisible({ timeout: 500 }))) {
-            logger.info("[AWS] ✅ MFA ingresado — continuando");
+            logger.info("[AWS] ✅ MFA ingresado manualmente");
             break;
           }
         }

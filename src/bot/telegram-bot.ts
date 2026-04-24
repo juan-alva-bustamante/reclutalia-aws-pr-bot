@@ -73,6 +73,57 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
   const bot = new Telegraf(config.telegram.token);
   const queue = new PrQueue();
 
+  // ── MFA por Telegram: el bot pide el código por DM al owner ──
+  let mfaResolve: ((code: string | null) => void) | null = null;
+
+  awsBrowser.onMfaRequired = async (): Promise<string | null> => {
+    return new Promise<string | null>((resolve) => {
+      mfaResolve = resolve;
+
+      // Enviar DM al owner pidiendo MFA
+      bot.telegram.sendMessage(
+        config.telegram.ownerUserId,
+        `🔐 *Se requiere código MFA*\nAsegurate que el token tenga minimo 20 seg de expiración.\n\nEnvía tu código de 6 dígitos aquí:`,
+        { parse_mode: "Markdown" },
+      ).catch((e) => {
+        logger.error(`[Bot] Error pidiendo MFA por DM: ${e}`);
+        resolve(null);
+      });
+
+      // Timeout de 90 segundos
+      setTimeout(() => {
+        if (mfaResolve === resolve) {
+          logger.warn("[Bot] Timeout esperando MFA por Telegram");
+          mfaResolve = null;
+          resolve(null);
+        }
+      }, 90_000);
+    });
+  };
+
+  // Listener de DMs del owner para capturar MFA
+  bot.on(message("text"), async (ctx, next) => {
+    // Solo interceptar DMs del owner cuando hay MFA pendiente
+    if (
+      ctx.chat.type === "private" &&
+      ctx.from?.id === config.telegram.ownerUserId &&
+      mfaResolve
+    ) {
+      const code = ctx.message.text.trim();
+      if (/^\d{6}$/.test(code)) {
+        logger.info("[Bot] MFA recibido por Telegram");
+        await ctx.reply("✅ Código MFA recibido, ingresando...");
+        const resolve = mfaResolve;
+        mfaResolve = null;
+        resolve(code);
+        return;
+      }
+      await ctx.reply("⚠️ El código MFA debe ser exactamente 6 dígitos numéricos.");
+      return;
+    }
+    return next();
+  });
+
   // ── Procesador: solo 2 mensajes (procesando + resultado) ──
   queue.setProcessor(async (item: QueueItem) => {
     const prInfo: PrInfo = { repo: item.repo, prNumber: item.prNumber, url: item.url };
@@ -112,9 +163,6 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
           `📦 Repo: \`${prInfo.repo}\`\n` +
           `👤 Por: @${approverDisplay}`,
       );
-      await bot.telegram.sendMessage(config.telegram.ownerUserId,
-        `✅ PR #${prInfo.prNumber} del repo ${prInfo.repo} mergeado por @${item.approvedBy ?? "unknown"}.`,
-      ).catch((e) => logger.warn(`[Bot] Error enviando DM al owner: ${e}`));
     } else {
       await sendToTopic(bot.telegram, item.chatId,
         `❌ *Error en PR #${prInfo.prNumber}*\n` +
