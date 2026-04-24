@@ -31,6 +31,7 @@ export interface QueueItem {
   status: "awaiting_approval" | "pending" | "processing" | "done" | "error" | "rejected";
   addedAt: string;
   chatId: number;
+  requestedBy?: string;
   approvedBy?: string;
   error?: string;
 }

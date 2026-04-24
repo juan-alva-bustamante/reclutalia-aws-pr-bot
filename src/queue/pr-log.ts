@@ -13,6 +13,7 @@ export interface PrLogEntry {
   error?: string;
   startedAt: string;
   finishedAt: string;
+  requestedBy?: string;
   approvedBy?: string;
   authorName?: string;
   authorEmail?: string;
@@ -26,7 +27,8 @@ export function logPrResult(entry: PrLogEntry): void {
     `${statusIcon} PR #${entry.prNumber} — ${entry.repo}`,
     `   Estado:    ${entry.status === "success" ? "COMPLETADO" : "ERROR"}`,
     `   URL:       ${entry.url}`,
-    `   Aprobado:  @${entry.approvedBy ?? "N/A"} (${entry.authorName ?? "N/A"} <${entry.authorEmail ?? "N/A"}>)`,
+    `   Solicitó:  @${entry.requestedBy ?? "N/A"}`,
+    `   Aprobó:    @${entry.approvedBy ?? "N/A"} (${entry.authorName ?? "N/A"} <${entry.authorEmail ?? "N/A"}>)`,
     `   Inicio:    ${entry.startedAt}`,
     `   Fin:       ${entry.finishedAt}`,
   ];

@@ -149,6 +149,7 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
       status: result.success ? "success" : "error",
       steps: result.steps, error: result.error,
       startedAt, finishedAt,
+      requestedBy: item.requestedBy,
       approvedBy: item.approvedBy,
       authorName: authorInfo?.name, authorEmail: authorInfo?.email,
     });
@@ -272,7 +273,7 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
     const prInfo = parsePrInfo(url);
     if (!prInfo) { await ctx.reply("❌ URL no válida."); return; }
 
-    const added = queue.enqueue({ url: prInfo.url, repo: prInfo.repo, prNumber: prInfo.prNumber, chatId: ctx.chat.id });
+    const added = queue.enqueue({ url: prInfo.url, repo: prInfo.repo, prNumber: prInfo.prNumber, chatId: ctx.chat.id, requestedBy: ctx.from?.username });
     if (added) {
       await sendApprovalRequest(bot.telegram, ctx.chat.id, prInfo);
     } else {
@@ -354,7 +355,7 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
 
     for (const prInfo of parsed) {
       const wasAdded = queue.enqueue({
-        url: prInfo.url, repo: prInfo.repo, prNumber: prInfo.prNumber, chatId: ctx.chat.id,
+        url: prInfo.url, repo: prInfo.repo, prNumber: prInfo.prNumber, chatId: ctx.chat.id, requestedBy: ctx.from?.username,
       });
       if (wasAdded) added.push(prInfo);
       else duplicates.push(prInfo);
