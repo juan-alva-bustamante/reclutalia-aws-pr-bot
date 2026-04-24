@@ -587,7 +587,10 @@ export class AWSBrowser {
       await this.dismissPopups();
 
       // Seleccionar 3-way merge
-      await this.selectThreeWayMerge();
+      if (!(await this.selectThreeWayMerge())) {
+        await this.pg.screenshot({ path: "error_merge_no_3way.png" });
+        throw new Error("No se pudo seleccionar 3-way merge");
+      }
       await this.sleep(2_000);
 
       // Llenar Author name y Email
@@ -685,7 +688,7 @@ export class AWSBrowser {
     return false;
   }
 
-  private async selectThreeWayMerge(): Promise<void> {
+  private async selectThreeWayMerge(): Promise<boolean> {
     logger.info("[AWS] Seleccionando 3-way merge...");
     const selected = await this.pg.evaluate(() => {
       const radios = Array.from(
@@ -704,7 +707,7 @@ export class AWSBrowser {
 
     if (selected) {
       logger.info("[AWS] ✅ 3-way merge seleccionado");
-      return;
+      return true;
     }
 
     // Playwright fallback
@@ -719,13 +722,14 @@ export class AWSBrowser {
         if (await el.isVisible({ timeout: 2_000 })) {
           await el.click({ force: true });
           logger.info(`[AWS] ✅ 3-way merge con locator: ${sel}`);
-          return;
+          return true;
         }
       } catch {
         /* next */
       }
     }
-    logger.warn("[AWS] ⚠️ No se pudo seleccionar 3-way merge");
+    logger.error("[AWS] ❌ No se pudo seleccionar 3-way merge");
+    return false;
   }
 
   private async fillReactInput(
