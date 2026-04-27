@@ -1,8 +1,9 @@
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { resolve, dirname } from "node:path";
 import { logger } from "../logger.js";
 import type { QueueItem } from "../types.js";
 
-const QUEUE_FILE = "pr_queue.json";
+const QUEUE_FILE = resolve(process.cwd(), "src/history/pr_queue.json");
 
 export class PrQueue {
   private items: QueueItem[] = [];
@@ -175,6 +176,8 @@ export class PrQueue {
   /** Persiste la cola a archivo */
   private save(): void {
     try {
+      const dir = dirname(QUEUE_FILE);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
       const toSave = this.items.filter(
         (i) => i.status === "awaiting_approval" || i.status === "pending" || i.status === "processing",
       );

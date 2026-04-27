@@ -1,7 +1,9 @@
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, mkdirSync } from "node:fs";
+import { resolve } from "node:path";
 import { logger } from "../logger.js";
 
-const LOG_FILE = "pr_bitacora.txt";
+const LOG_DIR = resolve(process.cwd(), "src/history");
+const LOG_FILE = resolve(LOG_DIR, "pr_bitacora.txt");
 const SEPARATOR = "─".repeat(60);
 
 export interface PrLogEntry {
@@ -45,6 +47,7 @@ export function logPrResult(entry: PrLogEntry): void {
   lines.push(SEPARATOR, "");
 
   try {
+    if (!existsSync(LOG_DIR)) mkdirSync(LOG_DIR, { recursive: true });
     appendFileSync(LOG_FILE, lines.join("\n") + "\n", "utf-8");
     logger.info(`[Bitácora] PR #${entry.prNumber} registrado`);
   } catch (e) {
@@ -52,16 +55,14 @@ export function logPrResult(entry: PrLogEntry): void {
   }
 }
 
-/** Lee las últimas N entradas de la bitácora para mostrar en Telegram */
+/** Lee las últimas N entradas de la bitácora */
 export function getRecentLogs(count = 5): string {
   try {
     if (!existsSync(LOG_FILE)) return "📭 Sin registros aún";
     const content = readFileSync(LOG_FILE, "utf-8");
     const entries = content.split(SEPARATOR).filter((e) => e.trim().length > 0);
     const recent = entries.slice(-count);
-    return recent.length > 0
-      ? recent.join(SEPARATOR)
-      : "📭 Sin registros aún";
+    return recent.length > 0 ? recent.join(SEPARATOR) : "📭 Sin registros aún";
   } catch {
     return "⚠️ Error leyendo bitácora";
   }

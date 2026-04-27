@@ -7,6 +7,7 @@ import {
 import { existsSync } from "node:fs";
 import { config } from "../config.js";
 import { logger } from "../logger.js";
+import { PrDebugger } from "../history/pr-debug.js";
 import type { PrFlowResult } from "../types.js";
 
 const FEEDBACK_MODAL_SELECTORS = [
@@ -561,63 +562,78 @@ export class AWSBrowser {
 
   // ── Merge PR ───────────────────────────────────────────────
 
-  private async mergePr(prUrl: string, author?: { name: string; email: string }): Promise<boolean> {
+  private async mergePr(prUrl: string, author?: { name: string; email: string }, debug?: PrDebugger): Promise<boolean> {
     logger.info(`[AWS] Navegando al PR para MERGE: ${prUrl}`);
     try {
       await this.navigateAndWait(prUrl, { timeout: 60_000 });
+      debug?.log("Página del PR cargada para merge");
+      await debug?.screenshot(this.pg, "merge_page_loaded");
 
       // Click en botón "Merge"
       const mergeClicked = await this.waitForButton("Merge", 30_000);
       if (!mergeClicked) {
-        // Playwright fallback
         if (!(await this.clickMergeButton())) {
-          await this.pg.screenshot({ path: "error_merge_no_button.png" });
+          debug?.log("❌ Botón Merge no encontrado");
+          await debug?.screenshot(this.pg, "merge_button_not_found");
           throw new Error("Botón Merge no encontrado");
         }
       }
+      debug?.log("Click en Merge OK");
 
       // Esperar página de merge
       try {
         await this.pg.waitForURL("**/merge**", { timeout: 15_000 });
       } catch {
         logger.warn(`[AWS] URL no cambió a /merge, actual: ${this.pg.url()}`);
+        debug?.log(`URL no cambió a /merge: ${this.pg.url()}`);
       }
       await this.waitForAwsLoaders(15_000);
       await this.waitForDomStable();
       await this.dismissPopups();
+      debug?.log("Página de merge cargada");
+      await debug?.screenshot(this.pg, "merge_form_loaded");
 
       // Seleccionar 3-way merge
       if (!(await this.selectThreeWayMerge())) {
-        await this.pg.screenshot({ path: "error_merge_no_3way.png" });
+        debug?.log("❌ No se pudo seleccionar 3-way merge");
+        await debug?.screenshot(this.pg, "3way_merge_failed");
+        await debug?.saveHtml(this.pg, "3way_merge_failed");
         throw new Error("No se pudo seleccionar 3-way merge");
       }
+      debug?.log("3-way merge seleccionado");
       await this.sleep(2_000);
 
       // Llenar Author name y Email
       await this.fillMergeAuthorFields(author);
+      debug?.log(`Author fields: ${author?.name ?? "default"} / ${author?.email ?? "default"}`);
       await this.sleep(2_000);
 
       // Asegurar que "Delete source branch" NO esté marcado
       await this.uncheckDeleteBranch();
       await this.sleep(1_000);
+      await debug?.screenshot(this.pg, "before_merge_submit");
 
       // Click en "Merge pull request"
       await this.clickMergePullRequest();
+      debug?.log("Click en 'Merge pull request'");
 
       await this.pg
         .waitForLoadState("domcontentloaded", { timeout: 20_000 })
         .catch(() => {});
       await this.sleep(4_000);
 
-      logger.info(`[AWS] ✅ Merge enviado (URL: ${this.pg.url()})`);
+      const finalUrl = this.pg.url();
+      debug?.log(`URL final post-merge: ${finalUrl}`);
+      await debug?.screenshot(this.pg, "after_merge_submit");
+
+      logger.info(`[AWS] ✅ Merge enviado (URL: ${finalUrl})`);
       return true;
     } catch (e) {
       logger.error(`[AWS] Error en merge: ${e}`);
+      debug?.log(`Error en merge: ${e}`);
       try {
-        await this.pg.screenshot({ path: "error_merge.png" });
-      } catch {
-        /* ignore */
-      }
+        await debug?.screenshot(this.pg, "merge_error");
+      } catch { /* */ }
       return false;
     }
   }
@@ -916,8 +932,14 @@ export class AWSBrowser {
 
   // ── Full PR Flow ───────────────────────────────────────────
 
-  async fullPrFlow(prUrl: string, author?: { name: string; email: string }): Promise<PrFlowResult> {
+  async fullPrFlow(prUrl: string, author?: { name: string; email: string }, prNumber?: string): Promise<PrFlowResult> {
     const result: PrFlowResult = { success: false, steps: [] };
+    // Extraer PR number de la URL si no se pasó
+    const prNum = prNumber ?? prUrl.match(/pull-requests\/(\d+)/)?.[1] ?? "unknown";
+    const debug = new PrDebugger(prNum);
+    debug.log(`Inicio de flujo para PR #${prNum}`);
+    debug.log(`URL: ${prUrl}`);
+    debug.log(`Author: ${author ? `${author.name} <${author.email}>` : "default"}`);
 
     try {
       // 0. Ensure browser is running
@@ -925,52 +947,75 @@ export class AWSBrowser {
 
       // 1. Login
       if (!(await this.isLoggedIn())) {
+        debug.log("Sesión no activa, iniciando login...");
         if (!(await this.login())) {
+          debug.log("❌ Login falló");
+          await debug.screenshot(this.pg, "login_failed");
           result.error = "No se pudo hacer login en AWS";
           return result;
         }
       }
+      debug.log("✅ Login OK");
       result.steps.push("✅ Login en AWS");
 
       // 2. Authorizer → Approve
-      if (
-        !(await this.switchRole(config.roles.authorizer, "devops/Authorizer"))
-      ) {
+      if (!(await this.switchRole(config.roles.authorizer, "devops/Authorizer"))) {
+        debug.log("❌ Falló switch a devops/Authorizer");
+        await debug.screenshot(this.pg, "switch_authorizer_failed");
         result.error = "Falló switch a devops/Authorizer";
         return result;
       }
       if (!(await this.approvePr(prUrl))) {
+        debug.log("❌ Falló aprobación con devops/Authorizer");
+        await debug.screenshot(this.pg, "approve_authorizer_failed");
         result.error = "Falló aprobación con devops/Authorizer";
         return result;
       }
+      debug.log("✅ Aprobado con devops/Authorizer");
       result.steps.push("✅ Aprobado con devops/Authorizer");
 
       // 3. Manager → Approve
       if (!(await this.switchRole(config.roles.manager, "devops/Manager"))) {
+        debug.log("❌ Falló switch a devops/Manager");
+        await debug.screenshot(this.pg, "switch_manager_failed");
         result.error = "Falló switch a devops/Manager";
         return result;
       }
       if (!(await this.approvePr(prUrl))) {
+        debug.log("❌ Falló aprobación con devops/Manager");
+        await debug.screenshot(this.pg, "approve_manager_failed");
         result.error = "Falló aprobación con devops/Manager";
         return result;
       }
+      debug.log("✅ Aprobado con devops/Manager");
       result.steps.push("✅ Aprobado con devops/Manager");
 
       // 4. MergeMaster → Merge
       if (!(await this.switchRole(config.roles.merge, "MergeMaster"))) {
+        debug.log("❌ Falló switch a MergeMaster");
+        await debug.screenshot(this.pg, "switch_mergemaster_failed");
         result.error = "Falló switch a MergeMaster";
         return result;
       }
-      if (!(await this.mergePr(prUrl, author))) {
+      debug.log("Iniciando merge...");
+      await debug.screenshot(this.pg, "before_merge");
+      if (!(await this.mergePr(prUrl, author, debug))) {
+        debug.log("❌ Falló el merge con MergeMaster");
+        await debug.screenshot(this.pg, "merge_failed");
+        await debug.saveHtml(this.pg, "merge_failed");
         result.error = "Falló el merge con MergeMaster";
         return result;
       }
+      debug.log("✅ Merge completado");
       result.steps.push("✅ Merge completado con MergeMaster");
 
       await this.saveSession();
       result.success = true;
+      debug.log("✅ Flujo completado exitosamente");
     } catch (e) {
       result.error = String(e);
+      debug.log(`❌ Error inesperado: ${e}`);
+      try { await debug.screenshot(this.pg, "unexpected_error"); } catch { /* */ }
     }
 
     return result;

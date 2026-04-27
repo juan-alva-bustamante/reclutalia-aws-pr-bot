@@ -9,3 +9,6 @@ debug_*.png
 package-lock.json
 pr_queue.json
 pr_bitacora.txt
+src/history/pull-requests/
+src/history/pr_queue.json
+src/history/pr_bitacora.txt

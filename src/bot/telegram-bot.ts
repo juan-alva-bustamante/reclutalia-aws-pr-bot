@@ -4,7 +4,7 @@ import { config } from "../config.js";
 import { logger } from "../logger.js";
 import { extractAllPrUrls, parsePrInfo } from "../utils/url-parser.js";
 import { PrQueue } from "../queue/pr-queue.js";
-import { logPrResult, getRecentLogs } from "../queue/pr-log.js";
+import { logPrResult, getRecentLogs } from "../history/pr-log.js";
 import type { AWSBrowser } from "../aws/browser.js";
 import type { PrInfo, QueueItem } from "../types.js";
 
@@ -141,7 +141,7 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
         `👤 Aprobado por: @${approverDisplay}${authorDisplay}`,
     );
 
-    const result = await awsBrowser.fullPrFlow(item.url, authorInfo);
+    const result = await awsBrowser.fullPrFlow(item.url, authorInfo, prInfo.prNumber);
     const finishedAt = new Date().toISOString();
 
     logPrResult({
