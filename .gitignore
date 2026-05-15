@@ -19,3 +19,5 @@ src/history/pr_queue.json
 src/history/pr_bitacora.txt
 pr_queue.json
 pr_bitacora.txt
+
+data/
