@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, readFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { logger } from "../logger.js";
 
-const LOG_DIR = resolve(process.cwd(), "src/history");
+const LOG_DIR = resolve(process.cwd(), "data");
 const LOG_FILE = resolve(LOG_DIR, "pr_bitacora.txt");
 const SEPARATOR = "─".repeat(60);
 

@@ -1,9 +1,9 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { logger } from "../logger.js";
-import type { QueueItem } from "../types.js";
+import type { QueueItem, QueueItemInput } from "../types/queue.types.js";
 
-const QUEUE_FILE = resolve(process.cwd(), "src/history/pr_queue.json");
+const QUEUE_FILE = resolve(process.cwd(), "data/pr_queue.json");
 
 export class PrQueue {
   private items: QueueItem[] = [];
@@ -20,7 +20,7 @@ export class PrQueue {
   }
 
   /** Agrega un PR a la cola esperando aprobación. Retorna true si fue agregado */
-  enqueue(item: Omit<QueueItem, "status" | "addedAt">): boolean {
+  enqueue(item: QueueItemInput): boolean {
     const exists = this.items.some(
       (i) =>
         i.url === item.url &&

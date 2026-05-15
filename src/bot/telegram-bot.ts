@@ -1,140 +1,31 @@
-import { Telegraf, Markup } from "telegraf";
-import { message } from "telegraf/filters";
+import { Telegraf } from "telegraf";
 import { config } from "../config.js";
 import { logger } from "../logger.js";
-import { extractAllPrUrls, parsePrInfo } from "../utils/url-parser.js";
 import { PrQueue } from "../queue/pr-queue.js";
-import { logPrResult, getRecentLogs } from "../history/pr-log.js";
+import { logPrResult } from "../history/pr-log.js";
 import type { AWSBrowser } from "../aws/browser.js";
 import type { PrInfo, QueueItem } from "../types.js";
-
-const APPROVE_WORDS = ["si", "sí", "autorizar"];
-const REJECT_WORDS = ["no", "denegar"];
-
-/** Helper — envía mensaje al topic. Si falla el formato, reintenta sin Markdown */
-async function sendToTopic(
-  telegram: Telegraf["telegram"],
-  chatId: number | string,
-  text: string,
-  parseMode: "Markdown" | "MarkdownV2" | undefined = "Markdown",
-): Promise<void> {
-  try {
-    await telegram.sendMessage(chatId, text, {
-      parse_mode: parseMode,
-      message_thread_id: config.telegram.topicId,
-    });
-  } catch (e) {
-    // Si falla por Markdown, reintentar sin formato
-    logger.warn(`[Bot] Error enviando mensaje con Markdown, reintentando sin formato: ${e}`);
-    try {
-      await telegram.sendMessage(chatId, text.replace(/[*`_]/g, ""), {
-        message_thread_id: config.telegram.topicId,
-      });
-    } catch (e2) {
-      logger.error(`[Bot] Error enviando mensaje sin formato: ${e2}`);
-    }
-  }
-}
-
-function isAuthorized(username: string | undefined): boolean {
-  if (!username) return false;
-  return config.telegram.authorizedUsers.some(
-    (u) => u === username.toLowerCase(),
-  );
-}
-
-async function sendApprovalRequest(
-  telegram: Telegraf["telegram"],
-  chatId: number | string,
-  prInfo: PrInfo,
-): Promise<void> {
-  await telegram.sendMessage(
-    chatId,
-    `🔔 *Solicitud de aprobación*\n\n` +
-      `📦 Repo: \`${prInfo.repo}\`\n` +
-      `🔢 PR #: \`${prInfo.prNumber}\`\n\n` +
-      `Antes de Aprobar se recomienda validar:\n` +
-      `▸ Ramas del PR (init-dev, dev-qa, qa-master)\n` +
-      `▸ Quien manda el PR\n` +
-      `▸ Cambios incluidos\n\n` +
-      `⁉ ¿Aprobar este PR?`,
-    {
-      parse_mode: "Markdown",
-      message_thread_id: config.telegram.topicId,
-      ...Markup.inlineKeyboard([
-        Markup.button.callback("✅ Aprobar", `approve:${prInfo.prNumber}`),
-        Markup.button.callback("❌ Rechazar", `reject:${prInfo.prNumber}`),
-      ]),
-    },
-  );
-}
+import { sendToTopic } from "./helpers.js";
+import { setupMfaHandler } from "./mfa-handler.js";
+import { registerCommands } from "./commands.js";
+import { registerHandlers } from "./handlers.js";
 
 export function createBot(awsBrowser: AWSBrowser): Telegraf {
   const bot = new Telegraf(config.telegram.token);
   const queue = new PrQueue();
 
-  // ── MFA por Telegram: el bot pide el código por DM al owner ──
-  let mfaResolve: ((code: string | null) => void) | null = null;
+  // 1. MFA handler (debe ir primero para interceptar DMs del owner)
+  setupMfaHandler(bot, awsBrowser);
 
-  awsBrowser.onMfaRequired = async (): Promise<string | null> => {
-    return new Promise<string | null>((resolve) => {
-      mfaResolve = resolve;
-
-      // Enviar DM al owner pidiendo MFA
-      bot.telegram.sendMessage(
-        config.telegram.ownerUserId,
-        `🔐 *Se requiere código MFA*\nAsegurate que el token tenga minimo 20 seg de expiración.\n\nEnvía tu código de 6 dígitos aquí:`,
-        { parse_mode: "Markdown" },
-      ).catch((e) => {
-        logger.error(`[Bot] Error pidiendo MFA por DM: ${e}`);
-        resolve(null);
-      });
-
-      // Timeout de 90 segundos
-      setTimeout(() => {
-        if (mfaResolve === resolve) {
-          logger.warn("[Bot] Timeout esperando MFA por Telegram");
-          mfaResolve = null;
-          resolve(null);
-        }
-      }, 90_000);
-    });
-  };
-
-  // Listener de DMs del owner para capturar MFA
-  bot.on(message("text"), async (ctx, next) => {
-    // Solo interceptar DMs del owner cuando hay MFA pendiente
-    if (
-      ctx.chat.type === "private" &&
-      ctx.from?.id === config.telegram.ownerUserId &&
-      mfaResolve
-    ) {
-      const code = ctx.message.text.trim();
-      if (/^\d{6}$/.test(code)) {
-        logger.info("[Bot] MFA recibido por Telegram");
-        await ctx.reply("✅ Código MFA recibido, ingresando...");
-        const resolve = mfaResolve;
-        mfaResolve = null;
-        resolve(code);
-        return;
-      }
-      await ctx.reply("⚠️ El código MFA debe ser exactamente 6 dígitos numéricos.");
-      return;
-    }
-    return next();
-  });
-
-  // ── Procesador: solo 2 mensajes (procesando + resultado) ──
+  // 2. Procesador de la cola
   queue.setProcessor(async (item: QueueItem) => {
     const prInfo: PrInfo = { repo: item.repo, prNumber: item.prNumber, url: item.url };
     const startedAt = new Date().toISOString();
     const approver = item.approvedBy?.toLowerCase();
     const authorInfo = approver ? config.userProfiles[approver] : undefined;
-    // Escapar _ en username para Markdown
     const approverDisplay = (item.approvedBy ?? "unknown").replace(/_/g, "\\_");
     const authorDisplay = authorInfo ? ` (${authorInfo.name})` : "";
 
-    // Mensaje 2: Procesando
     await sendToTopic(bot.telegram, item.chatId,
       `⏳ *Procesando PR #${prInfo.prNumber}*\n` +
         `📦 Repo: \`${prInfo.repo}\`\n` +
@@ -157,7 +48,6 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
     logger.info("[Bot] Cerrando browser después de procesar PR");
     await awsBrowser.close();
 
-    // Mensaje 3: Resultado
     if (result.success) {
       await sendToTopic(bot.telegram, item.chatId,
         `✅ *PR #${prInfo.prNumber} mergeado exitosamente*\n` +
@@ -171,17 +61,15 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
           `*Error:* \`${result.error}\`\n\n` +
           `⚠️ Revisa manualmente: ${item.url}`,
       );
-      // DM al owner con el detalle del error
       await bot.telegram.sendMessage(config.telegram.ownerUserId,
         `❌ Error en PR #${prInfo.prNumber} (${prInfo.repo})\n\n` +
           `Error: ${result.error}\n` +
           `Pasos completados: ${result.steps.length > 0 ? result.steps.join(", ") : "Ninguno"}\n\n` +
           `${item.url}`,
-      ).catch((e) => logger.warn(`[Bot] Error enviando DM de error al owner: ${e}`));
+      ).catch((e: unknown) => logger.warn(`[Bot] Error enviando DM de error al owner: ${e}`));
       throw new Error(result.error);
     }
 
-    // Solo si hay más PRs aprobados en cola
     if (queue.pendingCount > 0) {
       await sendToTopic(bot.telegram, item.chatId,
         `📋 ${queue.pendingCount} PR(s) en cola, procesando siguiente...`,
@@ -189,187 +77,11 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
     }
   });
 
-  // ── Botones inline: solo editan el mensaje original, no envían nuevo ──
-  bot.action(/^approve:(\d+)$/, async (ctx) => {
-    const prNumber = ctx.match[1];
-    const username = ctx.from?.username;
+  // 3. Comandos (/status, /queue, /log, /pr)
+  registerCommands(bot, queue);
 
-    if (!isAuthorized(username)) {
-      await ctx.answerCbQuery("⛔ No estás autorizado para aprobar PRs.");
-      return;
-    }
-
-    const item = queue.approve(prNumber, username ?? "unknown");
-    if (item) {
-      await ctx.answerCbQuery(`✅ PR #${prNumber} aprobado`);
-      const original = ctx.callbackQuery.message && "text" in ctx.callbackQuery.message
-        ? ctx.callbackQuery.message.text : "";
-      await ctx.editMessageText(
-        original + `\n\n✅ *Aprobado por @${username}*`,
-        { parse_mode: "Markdown" },
-      );
-      // Si hay otro PR procesándose, notificar que este queda en cola
-      if (queue.currentItem) {
-        await sendToTopic(bot.telegram,
-          ctx.callbackQuery.message?.chat.id ?? config.telegram.chatId,
-          `📋 PR #${prNumber} aprobado, en cola (procesando PR #${queue.currentItem.prNumber})`,
-        );
-      }
-    } else {
-      await ctx.answerCbQuery(`⚠️ PR #${prNumber} ya no está esperando aprobación.`);
-    }
-  });
-
-  bot.action(/^reject:(\d+)$/, async (ctx) => {
-    const prNumber = ctx.match[1];
-    const username = ctx.from?.username;
-
-    if (!isAuthorized(username)) {
-      await ctx.answerCbQuery("⛔ No estás autorizado para rechazar PRs.");
-      return;
-    }
-
-    const item = queue.reject(prNumber, username ?? "unknown");
-    if (item) {
-      await ctx.answerCbQuery(`🚫 PR #${prNumber} rechazado`);
-      const original = ctx.callbackQuery.message && "text" in ctx.callbackQuery.message
-        ? ctx.callbackQuery.message.text : "";
-      await ctx.editMessageText(
-        original + `\n\n🚫 *Rechazado por @${username}*`,
-        { parse_mode: "Markdown" },
-      );
-    } else {
-      await ctx.answerCbQuery(`⚠️ PR #${prNumber} ya no está esperando aprobación.`);
-    }
-  });
-
-  // ── Comandos ──
-  bot.command("status", async (ctx) => {
-    await ctx.reply(
-      `🤖 *Bot de PR Autorización*\n\n✅ Activo\n\n*Cola:*\n${queue.getSummary()}\n\n` +
-        `/status /queue /log /pr <url>`,
-      { parse_mode: "Markdown", message_thread_id: config.telegram.topicId },
-    );
-  });
-
-  bot.command("queue", async (ctx) => {
-    await ctx.reply(`📋 *Cola de PRs*\n\n${queue.getSummary()}`, {
-      parse_mode: "Markdown", message_thread_id: config.telegram.topicId,
-    });
-  });
-
-  bot.command("log", async (ctx) => {
-    await ctx.reply(`📒 *Bitácora (últimos 5)*\n\n\`\`\`\n${getRecentLogs(5)}\n\`\`\``, {
-      parse_mode: "Markdown", message_thread_id: config.telegram.topicId,
-    });
-  });
-
-  bot.command("pr", async (ctx) => {
-    if (!isAuthorized(ctx.from?.username)) {
-      await ctx.reply("⛔ No tienes permisos."); return;
-    }
-    const url = ctx.message.text.split(" ")[1];
-    if (!url) { await ctx.reply("Uso: /pr <url>"); return; }
-    const prInfo = parsePrInfo(url);
-    if (!prInfo) { await ctx.reply("❌ URL no válida."); return; }
-
-    const added = queue.enqueue({ url: prInfo.url, repo: prInfo.repo, prNumber: prInfo.prNumber, chatId: ctx.chat.id, requestedBy: ctx.from?.username });
-    if (added) {
-      await sendApprovalRequest(bot.telegram, ctx.chat.id, prInfo);
-    } else {
-      await ctx.reply(`ℹ️ PR #${prInfo.prNumber} ya está en cola.`);
-    }
-  });
-
-  // ── Listener de mensajes (texto) ──
-  bot.on(message("text"), async (ctx) => {
-    const text = ctx.message.text.trim();
-    const chatType = ctx.chat.type;
-
-    if (chatType === "private") return;
-    if (config.telegram.topicId && ctx.message.message_thread_id !== config.telegram.topicId) return;
-
-    // 1. Respuesta de aprobación/rechazo por texto
-    const textLower = text.toLowerCase();
-    const prNumberMatch = textLower.match(/#?(\d{4,})/);
-    const commandPart = textLower.replace(/#?\d+/g, "").trim();
-    const firstWord = commandPart.split(/\s+/)[0];
-    const isApprove = APPROVE_WORDS.includes(firstWord);
-    const isReject = REJECT_WORDS.includes(firstWord);
-    const isExactCommand = commandPart === firstWord;
-
-    if ((isApprove || isReject) && isExactCommand) {
-      if (!isAuthorized(ctx.from?.username)) {
-        await sendToTopic(bot.telegram, ctx.chat.id,
-          `⛔ @${ctx.from?.username ?? "usuario"} no autorizado.`);
-        return;
-      }
-
-      const awaiting = queue.awaitingApproval;
-      if (awaiting.length === 0) return;
-
-      let targetPrNumber: string | null = null;
-      if (prNumberMatch) {
-        targetPrNumber = prNumberMatch[1];
-      } else if (awaiting.length === 1) {
-        targetPrNumber = awaiting[0].prNumber;
-      } else {
-        const list = awaiting.map((p) => `  • PR #${p.prNumber} (${p.repo})`).join("\n");
-        await sendToTopic(bot.telegram, ctx.chat.id,
-          `⚠️ Hay ${awaiting.length} PRs pendientes:\n${list}\n\nEspecifica: *si #NUMERO*`);
-        return;
-      }
-
-      const username = ctx.from?.username ?? "unknown";
-      if (isApprove) {
-        const item = queue.approve(targetPrNumber, username);
-        if (!item) {
-          await sendToTopic(bot.telegram, ctx.chat.id, `⚠️ PR #${targetPrNumber} no está pendiente.`);
-        }
-        // No envía mensaje extra — el procesador ya envía "Procesando"
-      } else {
-        const item = queue.reject(targetPrNumber, username);
-        if (item) {
-          await sendToTopic(bot.telegram, ctx.chat.id,
-            `🚫 PR #${targetPrNumber} *rechazado* por @${username}`);
-        }
-      }
-      return;
-    }
-
-    // 2. Detectar URLs de PR
-    const prUrls = extractAllPrUrls(text);
-    if (prUrls.length === 0) return;
-
-    const parsed: PrInfo[] = [];
-    for (const url of prUrls) {
-      const info = parsePrInfo(url);
-      if (info) parsed.push(info);
-    }
-    if (parsed.length === 0) return;
-
-    logger.info(`${parsed.length} PR(s) detectados en mensaje`);
-
-    const added: PrInfo[] = [];
-    const duplicates: PrInfo[] = [];
-
-    for (const prInfo of parsed) {
-      const wasAdded = queue.enqueue({
-        url: prInfo.url, repo: prInfo.repo, prNumber: prInfo.prNumber, chatId: ctx.chat.id, requestedBy: ctx.from?.username,
-      });
-      if (wasAdded) added.push(prInfo);
-      else duplicates.push(prInfo);
-    }
-
-    for (const prInfo of added) {
-      await sendApprovalRequest(bot.telegram, ctx.chat.id, prInfo);
-    }
-
-    if (duplicates.length > 0) {
-      await sendToTopic(bot.telegram, ctx.chat.id,
-        `ℹ️ Ya en cola: ${duplicates.map((p) => `PR #${p.prNumber}`).join(", ")}`);
-    }
-  });
+  // 4. Handlers (botones inline + mensajes de texto)
+  registerHandlers(bot, queue);
 
   return bot;
 }

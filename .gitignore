@@ -7,8 +7,15 @@ error_*.png
 debug_*.png
 .DS_Store
 package-lock.json
-pr_queue.json
-pr_bitacora.txt
+
+# Runtime data
+data/pull-requests/
+data/pr_queue.json
+data/pr_bitacora.txt
+
+# Legacy paths (por si quedan)
 src/history/pull-requests/
 src/history/pr_queue.json
 src/history/pr_bitacora.txt
+pr_queue.json
+pr_bitacora.txt

@@ -1,4 +1,5 @@
 import "dotenv/config";
+import type { RoleConfig } from "./types/aws.types.js";
 
 function required(key: string): string {
   const value = process.env[key];
@@ -35,15 +36,21 @@ export const config = {
     authorEmail: process.env.AWS_AUTHOR_EMAIL ?? "bot@merge.local",
   },
   roles: {
-    authorizer:
-      process.env.ROLE_AUTHORIZER_URL ??
-      "https://signin.aws.amazon.com/switchrole?roleName=devops/Authorizer&account=upax-reclutalia-dev",
-    manager:
-      process.env.ROLE_MANAGER_URL ??
-      "https://signin.aws.amazon.com/switchrole?roleName=devops/Manager&account=upax-reclutalia-dev",
-    merge:
-      process.env.ROLE_MERGE_URL ??
-      "https://signin.aws.amazon.com/switchrole?roleName=MergeMaster&account=upax-reclutalia-dev",
+    authorizer: {
+      url: process.env.ROLE_AUTHORIZER_URL ??
+        "https://signin.aws.amazon.com/switchrole?roleName=devops/Authorizer&account=upax-reclutalia-dev",
+      name: "devops/Authorizer",
+    } satisfies RoleConfig,
+    manager: {
+      url: process.env.ROLE_MANAGER_URL ??
+        "https://signin.aws.amazon.com/switchrole?roleName=devops/Manager&account=upax-reclutalia-dev",
+      name: "devops/Manager",
+    } satisfies RoleConfig,
+    merge: {
+      url: process.env.ROLE_MERGE_URL ??
+        "https://signin.aws.amazon.com/switchrole?roleName=MergeMaster&account=upax-reclutalia-dev",
+      name: "MergeMaster",
+    } satisfies RoleConfig,
   },
   sessionFile: "aws_session.json",
   headless: process.env.HEADLESS === "true",

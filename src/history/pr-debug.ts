@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { logger } from "../logger.js";
 import type { Page } from "playwright";
 
-const HISTORY_DIR = resolve(process.cwd(), "src/history/pull-requests");
+const HISTORY_DIR = resolve(process.cwd(), "data/pull-requests");
 
 export class PrDebugger {
   private dir: string;
