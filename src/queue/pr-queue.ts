@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { logger } from "../logger.js";
 import type { QueueItem, QueueItemInput } from "../types/queue.types.js";
+import { prEmitter } from "../ws/pr-emitter.js";
 
 const QUEUE_FILE = resolve(process.cwd(), "data/pr_queue.json");
 
@@ -185,5 +186,21 @@ export class PrQueue {
     } catch (e) {
       logger.error(`[Queue] Error guardando cola: ${e}`);
     }
+
+    // Emitir actualización de cola al widget
+    this.emitQueueUpdate();
+  }
+
+  /** Emite el estado actual de la cola al WebSocket */
+  private emitQueueUpdate(): void {
+    const pending = this.items
+      .filter((i) => i.status === "awaiting_approval" || i.status === "pending" || i.status === "processing")
+      .map((i) => ({
+        prNumber: i.prNumber,
+        repo: i.repo,
+        approvedBy: i.approvedBy,
+        status: i.status as "awaiting_approval" | "pending" | "processing",
+      }));
+    prEmitter.updateQueue(pending);
   }
 }

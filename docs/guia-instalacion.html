@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Guía de Instalación — Bot de PR Autorización</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      line-height: 1.6;
+      padding: 40px 20px;
+    }
+    .container { max-width: 800px; margin: 0 auto; }
+    h1 { color: #38bdf8; font-size: 2rem; margin-bottom: 8px; }
+    h2 { color: #7dd3fc; font-size: 1.4rem; margin-top: 40px; margin-bottom: 16px; border-bottom: 1px solid #334155; padding-bottom: 8px; }
+    h3 { color: #bae6fd; font-size: 1.1rem; margin-top: 24px; margin-bottom: 8px; }
+    p { margin-bottom: 12px; color: #cbd5e1; }
+    .subtitle { color: #94a3b8; font-size: 0.95rem; margin-bottom: 32px; }
+    code {
+      background: #1e293b;
+      color: #38bdf8;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      font-size: 0.9em;
+    }
+    pre {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 16px;
+      overflow-x: auto;
+      margin: 12px 0 20px;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+    pre code { background: none; padding: 0; color: #e2e8f0; }
+    .step {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 20px;
+      margin: 16px 0;
+    }
+    .step-number {
+      display: inline-block;
+      background: #38bdf8;
+      color: #0f172a;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      text-align: center;
+      line-height: 28px;
+      font-weight: 700;
+      font-size: 0.85rem;
+      margin-right: 10px;
+    }
+    .step-title { font-weight: 600; color: #f1f5f9; font-size: 1.05rem; }
+    .warning {
+      background: #422006;
+      border: 1px solid #92400e;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin: 12px 0;
+    }
+    .warning::before { content: "⚠️ "; }
+    .success {
+      background: #052e16;
+      border: 1px solid #166534;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin: 12px 0;
+    }
+    .success::before { content: "✅ "; }
+    .info {
+      background: #0c1929;
+      border: 1px solid #1e40af;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin: 12px 0;
+    }
+    .info::before { content: "ℹ️ "; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 20px;
+    }
+    th, td {
+      border: 1px solid #334155;
+      padding: 10px 12px;
+      text-align: left;
+    }
+    th { background: #1e293b; color: #7dd3fc; font-weight: 600; }
+    td { color: #cbd5e1; }
+    td code { font-size: 0.85em; }
+    a { color: #38bdf8; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .env-table td:first-child { white-space: nowrap; }
+    ul { padding-left: 20px; margin: 8px 0 16px; }
+    li { margin-bottom: 6px; color: #cbd5e1; }
+    .toc { background: #1e293b; border-radius: 8px; padding: 16px 20px; margin: 20px 0 32px; }
+    .toc a { display: block; padding: 4px 0; color: #94a3b8; }
+    .toc a:hover { color: #38bdf8; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🤖 Bot de PR Autorización</h1>
+    <p class="subtitle">Guía paso a paso para instalar y configurar el bot en tu computadora</p>
+
+    <div class="toc">
+      <strong style="color: #f1f5f9;">Contenido</strong>
+      <a href="#requisitos">1. Requisitos previos</a>
+      <a href="#instalacion">2. Instalación</a>
+      <a href="#telegram">3. Configurar Telegram</a>
+      <a href="#env">4. Configurar variables de entorno</a>
+      <a href="#ejecutar">5. Ejecutar el bot</a>
+      <a href="#uso">6. Cómo usar el bot</a>
+      <a href="#pm2">7. Mantenerlo corriendo (PM2)</a>
+      <a href="#problemas">8. Solución de problemas</a>
+    </div>
+
+    <!-- REQUISITOS -->
+    <h2 id="requisitos">1. Requisitos previos</h2>
+    <p>Necesitas tener instalado en tu Mac:</p>
+    <table>
+      <tr><th>Software</th><th>Versión mínima</th><th>Cómo verificar</th></tr>
+      <tr><td>Node.js</td><td>18+</td><td><code>node --version</code></td></tr>
+      <tr><td>npm</td><td>9+</td><td><code>npm --version</code></td></tr>
+      <tr><td>Git</td><td>cualquiera</td><td><code>git --version</code></td></tr>
+    </table>
+    <p>Si no tienes Node.js, instálalo con:</p>
+    <pre><code>brew install node</code></pre>
+
+    <!-- INSTALACIÓN -->
+    <h2 id="instalacion">2. Instalación</h2>
+
+    <div class="step">
+      <span class="step-number">1</span>
+      <span class="step-title">Clonar el repositorio</span>
+      <pre><code>git clone https://bitbucket.org/tu-org/reclutalia-aws-pr-bot.git
+cd reclutalia-aws-pr-bot</code></pre>
+    </div>
+
+    <div class="step">
+      <span class="step-number">2</span>
+      <span class="step-title">Instalar dependencias</span>
+      <pre><code>npm install</code></pre>
+      <p>Esto también instala Chromium automáticamente (necesario para la automatización).</p>
+      <div class="info">La primera vez puede tardar 2-3 minutos por la descarga de Chromium.</div>
+    </div>
+
+    <div class="step">
+      <span class="step-number">3</span>
+      <span class="step-title">Copiar archivo de configuración</span>
+      <pre><code>cp .env.example .env</code></pre>
+    </div>
+
+    <!-- TELEGRAM -->
+    <h2 id="telegram">3. Configurar Telegram</h2>
+
+    <h3>3.1 — Crear el bot de Telegram</h3>
+    <div class="step">
+      <span class="step-number">1</span>
+      <span class="step-title">Hablar con @BotFather en Telegram</span>
+      <p>Abre Telegram, busca <code>@BotFather</code> y envía:</p>
+      <pre><code>/newbot</code></pre>
+      <p>Te pedirá un nombre y un username. Ejemplo:</p>
+      <ul>
+        <li>Nombre: <code>PR Autorización Bot</code></li>
+        <li>Username: <code>mi_pr_auth_bot</code> (debe terminar en "bot")</li>
+      </ul>
+      <p>BotFather te dará un <strong>token</strong> como: <code>7123456789:AAH...</code></p>
+      <p>Guárdalo, lo necesitas para el <code>.env</code>.</p>
+    </div>
+
+    <h3>3.2 — Crear el grupo de Telegram</h3>
+    <div class="step">
+      <span class="step-number">2</span>
+      <span class="step-title">Crear un grupo y agregar el bot</span>
+      <ul>
+        <li>Crea un grupo nuevo en Telegram (ej: "PR Autorización")</li>
+        <li>Agrega tu bot al grupo</li>
+        <li>Hazlo <strong>administrador</strong> del grupo (necesita permisos para leer y enviar mensajes)</li>
+      </ul>
+    </div>
+
+    <h3>3.3 — Obtener el Chat ID del grupo</h3>
+    <div class="step">
+      <span class="step-number">3</span>
+      <span class="step-title">Obtener el Chat ID</span>
+      <p>Envía cualquier mensaje en el grupo, luego abre en tu navegador:</p>
+      <pre><code>https://api.telegram.org/bot&lt;TU_TOKEN&gt;/getUpdates</code></pre>
+      <p>Busca <code>"chat":{"id":-100XXXXXXXXXX}</code>. Ese número negativo es tu <code>TELEGRAM_CHAT_ID</code>.</p>
+    </div>
+
+    <h3>3.4 — (Opcional) Usar Topics</h3>
+    <p>Si tu grupo tiene Topics habilitados y quieres que el bot solo hable en un topic específico:</p>
+    <ul>
+      <li>Envía un mensaje en el topic deseado</li>
+      <li>En la respuesta de <code>getUpdates</code>, busca <code>"message_thread_id": 205</code></li>
+      <li>Ese número es tu <code>TELEGRAM_TOPIC_ID</code></li>
+    </ul>
+
+    <h3>3.5 — Obtener tu User ID</h3>
+    <div class="step">
+      <span class="step-number">4</span>
+      <span class="step-title">Obtener tu User ID de Telegram</span>
+      <p>Habla con <code>@userinfobot</code> en Telegram. Te responderá con tu ID numérico.</p>
+      <p>Ese es tu <code>TELEGRAM_OWNER_USER_ID</code> (para recibir MFA y alertas por DM).</p>
+    </div>
+
+    <h3>3.6 — Usuarios autorizados</h3>
+    <div class="warning">Solo los usuarios listados en <code>TELEGRAM_AUTHORIZED_USERS</code> pueden aprobar o rechazar PRs. Si alguien no está en la lista, el bot le dirá "No estás autorizado".</div>
+    <p>Agrega los <strong>usernames de Telegram</strong> (sin @) separados por coma:</p>
+    <pre><code>TELEGRAM_AUTHORIZED_USERS=juanalva997,JcLievano,gabrielbarba28,el_chambas3000</code></pre>
+
+    <!-- ENV -->
+    <h2 id="env">4. Configurar variables de entorno</h2>
+    <p>Edita el archivo <code>.env</code> con tus datos:</p>
+
+    <table class="env-table">
+      <tr><th>Variable</th><th>Qué poner</th><th>Ejemplo</th></tr>
+      <tr>
+        <td><code>TELEGRAM_BOT_TOKEN</code></td>
+        <td>Token que te dio BotFather</td>
+        <td><code>7123456789:AAH...</code></td>
+      </tr>
+      <tr>
+        <td><code>TELEGRAM_CHAT_ID</code></td>
+        <td>ID del grupo (número negativo)</td>
+        <td><code>-1001234567890</code></td>
+      </tr>
+      <tr>
+        <td><code>TELEGRAM_OWNER_USER_ID</code></td>
+        <td>Tu User ID numérico</td>
+        <td><code>123456789</code></td>
+      </tr>
+      <tr>
+        <td><code>TELEGRAM_TOPIC_ID</code></td>
+        <td>ID del topic (opcional, dejar vacío si no usas topics)</td>
+        <td><code>205</code></td>
+      </tr>
+      <tr>
+        <td><code>TELEGRAM_AUTHORIZED_USERS</code></td>
+        <td>Usernames de Telegram autorizados (sin @, separados por coma)</td>
+        <td><code>juanalva997,JcLievano</code></td>
+      </tr>
+      <tr>
+        <td><code>AWS_LOGIN_URL</code></td>
+        <td>URL de login de tu cuenta AWS</td>
+        <td><code>https://upax-reclutalia-dev.signin.aws.amazon.com/console</code></td>
+      </tr>
+      <tr>
+        <td><code>AWS_ACCOUNT_ID</code></td>
+        <td>Alias o ID de la cuenta AWS</td>
+        <td><code>upax-reclutalia-dev</code></td>
+      </tr>
+      <tr>
+        <td><code>AWS_USERNAME</code></td>
+        <td>Tu usuario IAM de AWS</td>
+        <td><code>tu.usuario</code></td>
+      </tr>
+      <tr>
+        <td><code>AWS_PASSWORD</code></td>
+        <td>Tu contraseña IAM de AWS</td>
+        <td><code>TuPassword123!</code></td>
+      </tr>
+      <tr>
+        <td><code>HEADLESS</code></td>
+        <td><code>true</code> = browser invisible, <code>false</code> = ves el browser</td>
+        <td><code>true</code></td>
+      </tr>
+    </table>
+
+    <div class="warning">Nunca compartas tu archivo <code>.env</code>. Contiene credenciales sensibles. Ya está en <code>.gitignore</code>.</div>
+
+    <!-- EJECUTAR -->
+    <h2 id="ejecutar">5. Ejecutar el bot</h2>
+
+    <div class="step">
+      <span class="step-number">1</span>
+      <span class="step-title">Compilar y ejecutar</span>
+      <pre><code>npm run start</code></pre>
+      <p>Deberías ver:</p>
+      <pre><code>🚀 Iniciando bot de PR Autorización...
+[WS] Servidor WebSocket iniciado en puerto 9876
+🤖 Bot de Telegram iniciado, escuchando mensajes...
+✅ Bot corriendo. Presiona Ctrl+C para detener.</code></pre>
+    </div>
+
+    <div class="success">Si ves ese mensaje, el bot está funcionando. Ahora pega una URL de PR en el grupo de Telegram y verás la solicitud de aprobación.</div>
+
+    <h3>Primera vez: MFA</h3>
+    <p>La primera vez que el bot intente hacer login en AWS, te pedirá el código MFA por DM en Telegram. Asegúrate de:</p>
+    <ul>
+      <li>Tener tu app de MFA lista (Google Authenticator, etc.)</li>
+      <li>Responder con los 6 dígitos cuando el bot te escriba por DM</li>
+      <li>Que el código tenga al menos 20 segundos antes de expirar</li>
+    </ul>
+    <p>Después del primer login, el bot guarda la sesión y no vuelve a pedir MFA hasta que expire.</p>
+
+    <!-- USO -->
+    <h2 id="uso">6. Cómo usar el bot</h2>
+
+    <h3>Flujo normal</h3>
+    <ol style="padding-left: 20px; margin: 12px 0;">
+      <li>Alguien pega una URL de PR de CodeCommit en el grupo</li>
+      <li>El bot detecta la URL y envía botones: ✅ Aprobar / ❌ Rechazar</li>
+      <li>Un usuario autorizado hace click en ✅</li>
+      <li>El bot procesa el PR automáticamente (approve + merge)</li>
+      <li>Reporta el resultado en el grupo</li>
+    </ol>
+
+    <h3>Comandos disponibles</h3>
+    <table>
+      <tr><th>Comando</th><th>Qué hace</th></tr>
+      <tr><td><code>/status</code></td><td>Muestra si el bot está activo y el estado de la cola</td></tr>
+      <tr><td><code>/queue</code></td><td>Muestra los PRs en cola</td></tr>
+      <tr><td><code>/log</code></td><td>Muestra los últimos 5 PRs procesados</td></tr>
+      <tr><td><code>/pr &lt;url&gt;</code></td><td>Agrega un PR manualmente</td></tr>
+    </table>
+
+    <h3>Aprobar por texto</h3>
+    <p>También puedes aprobar escribiendo en el grupo:</p>
+    <ul>
+      <li><code>si</code> — aprueba el PR pendiente (si solo hay uno)</li>
+      <li><code>si #29540</code> — aprueba un PR específico (si hay varios)</li>
+      <li><code>no</code> — rechaza el PR pendiente</li>
+    </ul>
+
+    <!-- PM2 -->
+    <h2 id="pm2">7. Mantenerlo corriendo (PM2)</h2>
+    <p>Para que el bot se mantenga corriendo aunque cierres la terminal:</p>
+
+    <div class="step">
+      <span class="step-number">1</span>
+      <span class="step-title">Instalar PM2 (una sola vez)</span>
+      <pre><code>npm install -g pm2</code></pre>
+    </div>
+
+    <div class="step">
+      <span class="step-number">2</span>
+      <span class="step-title">Iniciar el bot con PM2</span>
+      <pre><code>npm run build
+pm2 start dist/main.js --name reclutalia-pr-bot</code></pre>
+    </div>
+
+    <div class="step">
+      <span class="step-number">3</span>
+      <span class="step-title">Comandos útiles de PM2</span>
+      <pre><code># Ver estado
+pm2 status
+
+# Ver logs en tiempo real
+pm2 logs reclutalia-pr-bot
+
+# Reiniciar
+pm2 restart reclutalia-pr-bot
+
+# Detener
+pm2 stop reclutalia-pr-bot
+
+# Que arranque al reiniciar la Mac
+pm2 startup
+pm2 save</code></pre>
+    </div>
+
+    <!-- PROBLEMAS -->
+    <h2 id="problemas">8. Solución de problemas</h2>
+
+    <h3>El bot no responde en Telegram</h3>
+    <ul>
+      <li>Verifica que el bot sea admin del grupo</li>
+      <li>Verifica que el <code>TELEGRAM_CHAT_ID</code> sea correcto</li>
+      <li>Si usas topics, verifica el <code>TELEGRAM_TOPIC_ID</code></li>
+      <li>Revisa los logs: <code>pm2 logs reclutalia-pr-bot</code></li>
+    </ul>
+
+    <h3>Error "No estás autorizado"</h3>
+    <ul>
+      <li>Tu username de Telegram debe estar en <code>TELEGRAM_AUTHORIZED_USERS</code></li>
+      <li>El username es <strong>sin @</strong> y <strong>case-insensitive</strong></li>
+      <li>Después de editar el <code>.env</code>, reinicia el bot</li>
+    </ul>
+
+    <h3>Error de login en AWS</h3>
+    <ul>
+      <li>Verifica usuario y contraseña en el <code>.env</code></li>
+      <li>Si cambió tu contraseña de AWS, actualiza el <code>.env</code> y reinicia</li>
+      <li>Borra <code>aws_session.json</code> para forzar un login limpio</li>
+    </ul>
+
+    <h3>Error "Navigation interrupted"</h3>
+    <ul>
+      <li>Es intermitente (~5% de los PRs). El bot ya tiene retry automático.</li>
+      <li>Si falla, simplemente vuelve a aprobar el PR en Telegram.</li>
+    </ul>
+
+    <h3>El bot se queda "procesando" y no avanza</h3>
+    <ul>
+      <li>Reinicia: <code>pm2 restart reclutalia-pr-bot</code></li>
+      <li>Si persiste, borra <code>aws_session.json</code> y reinicia</li>
+    </ul>
+
+    <h3>Quiero ver qué hace el browser</h3>
+    <p>Cambia en <code>.env</code>:</p>
+    <pre><code>HEADLESS=false</code></pre>
+    <p>Reinicia el bot y verás el browser de Chromium abrirse y navegar.</p>
+
+    <hr style="border-color: #334155; margin: 40px 0;">
+    <p style="text-align: center; color: #64748b; font-size: 0.85rem;">
+      Reclutalia AWS PR Bot — Documentación interna<br>
+      Última actualización: Mayo 2026
+    </p>
+  </div>
+</body>
+</html>

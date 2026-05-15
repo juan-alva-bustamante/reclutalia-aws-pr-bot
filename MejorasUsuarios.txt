@@ -14,3 +14,33 @@ Ahora ayudame a reducir los mensajes, hoy en dia se mandan 4 mensajes para aprob
 
 Solo necesito 3, solicitud, procesando y exito o error, ayudame a no enviar tantos mensajes
 Mas el mensaje si se aprueba un mensaje mientras otro esta siendo procesado, mensaje de que hay un pr en cola
+
+NUEVA IMPLEMENTACION
+
+Teniendo el repo funcionado quiero tener una vista en la cual pueda ver el estatus de los PR en cola y en curso, quiero ver en alguna ventana emergente como spotify , algo muy chico que no sea intrusivo , como va avanzando el PR 
+Tal vez manejar algunos engranes o algo para ir viendo como va avanzando por pasos
+Necesitos 2 cosas:
+1. Con que herramienta podriamos hacerlo web app, escritorio y con que tecnologia
+2. Un prompt para pasarlo a la IA de stitch para que cree un diseño
+
+No aceptes tal cual todo lo que digo, si necesitas mas info o algo dimelo y cuestioname
+
+
+RESPUESTAS
+¿Quién lo va a ver? ¿Solo tú (el TL/owner del bot) o todo el equipo que manda PRs?
+Solo lo veria el TL/Owner
+
+¿Dónde lo quieres ver? Dices "ventana emergente como Spotify" — ¿te refieres a un widget flotante siempre visible en tu escritorio (tipo menubar app en macOS)? ¿O algo que abres en el browser cuando quieres?
+Lo quiero ver en una ventana como una app
+
+¿Necesita ser real-time? Es decir, ¿quieres ver el paso avanzar en vivo (login → authorizer → manager → merge) segundo a segundo? ¿O basta con que se actualice cada 5-10 segundos?
+Si lo quiero ver en real time
+
+¿Interacción o solo lectura? ¿Solo quieres ver el progreso, o también quieres poder aprobar/rechazar desde ahí (reemplazando Telegram)?
+Solo lo quiero en modo lectura
+
+¿Cuántos PRs simultáneos ves normalmente? Por lo que vi en la cola, se procesan de a uno. ¿La vista sería básicamente "el PR actual + los que están en cola esperando"?
+Solo es 1 PR simultaneo, si hay mas de 1 PR se encola hasta que termine el que esta en ejecucion
+
+¿Qué tan "always on" necesitas que sea? ¿Lo dejas abierto todo el día o lo abres solo cuando mandas un PR?
+Lo quiero abrir cada que quiera, si puede ser todo el dia
