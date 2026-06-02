@@ -7,6 +7,22 @@ function required(key: string): string {
   return value;
 }
 
+/**
+ * Parsea USER_PROFILES del .env.
+ * Formato: "username1:Nombre Completo:email@dom.com,username2:Nombre:email@dom.com"
+ */
+function parseUserProfiles(raw: string): Record<string, { name: string; email: string }> {
+  const profiles: Record<string, { name: string; email: string }> = {};
+  if (!raw.trim()) return profiles;
+  for (const entry of raw.split(",")) {
+    const [username, name, email] = entry.trim().split(":");
+    if (username && name && email) {
+      profiles[username.toLowerCase()] = { name, email };
+    }
+  }
+  return profiles;
+}
+
 export const config = {
   telegram: {
     token: required("TELEGRAM_BOT_TOKEN"),
@@ -21,12 +37,7 @@ export const config = {
       .filter((u) => u.length > 0),
   },
   /** Mapeo de username de Telegram → datos de autor para el merge en AWS */
-  userProfiles: {
-    gabrielbarba28: { name: "Gabriel Barba", email: "gabriel.barba@elektra.com.mx" },
-    jclievano: { name: "Juan Carlos Lievano", email: "juan.lievano@tecnologiaaccionable.mx" },
-    el_chambas3000: { name: "Felipe Guadarrama", email: "felipe.guadarramah@elektra.com.mx" },
-    juanalva997: { name: "Juan Alva Bustamante", email: "juan.alva@elektra.com.mx" },
-  } as Record<string, { name: string; email: string }>,
+  userProfiles: parseUserProfiles(process.env.USER_PROFILES ?? ""),
   aws: {
     loginUrl: required("AWS_LOGIN_URL"),
     accountId: process.env.AWS_ACCOUNT_ID ?? "",
@@ -37,19 +48,16 @@ export const config = {
   },
   roles: {
     authorizer: {
-      url: process.env.ROLE_AUTHORIZER_URL ??
-        "https://signin.aws.amazon.com/switchrole?roleName=devops/Authorizer&account=upax-reclutalia-dev",
-      name: "devops/Authorizer",
+      url: required("ROLE_AUTHORIZER_URL"),
+      name: process.env.ROLE_AUTHORIZER_NAME ?? "devops/Authorizer",
     } satisfies RoleConfig,
     manager: {
-      url: process.env.ROLE_MANAGER_URL ??
-        "https://signin.aws.amazon.com/switchrole?roleName=devops/Manager&account=upax-reclutalia-dev",
-      name: "devops/Manager",
+      url: required("ROLE_MANAGER_URL"),
+      name: process.env.ROLE_MANAGER_NAME ?? "devops/Manager",
     } satisfies RoleConfig,
     merge: {
-      url: process.env.ROLE_MERGE_URL ??
-        "https://signin.aws.amazon.com/switchrole?roleName=MergeMaster&account=upax-reclutalia-dev",
-      name: "MergeMaster",
+      url: required("ROLE_MERGE_URL"),
+      name: process.env.ROLE_MERGE_NAME ?? "MergeMaster",
     } satisfies RoleConfig,
   },
   sessionFile: "aws_session.json",

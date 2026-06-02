@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Guía de Instalación — Bot de PR Autorización</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.6; padding: 40px 20px; }
+    .container { max-width: 800px; margin: 0 auto; }
+    h1 { color: #38bdf8; font-size: 2rem; margin-bottom: 8px; }
+    h2 { color: #7dd3fc; font-size: 1.4rem; margin-top: 40px; margin-bottom: 16px; border-bottom: 1px solid #334155; padding-bottom: 8px; }
+    h3 { color: #bae6fd; font-size: 1.1rem; margin-top: 24px; margin-bottom: 8px; }
+    p { margin-bottom: 12px; color: #cbd5e1; }
+    .subtitle { color: #94a3b8; font-size: 0.95rem; margin-bottom: 32px; }
+    code { background: #1e293b; color: #38bdf8; padding: 2px 6px; border-radius: 4px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.9em; }
+    pre { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 16px; overflow-x: auto; margin: 12px 0 20px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.85rem; line-height: 1.5; }
+    pre code { background: none; padding: 0; color: #e2e8f0; }
+    .step { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; margin: 16px 0; }
+    .step-number { display: inline-block; background: #38bdf8; color: #0f172a; width: 28px; height: 28px; border-radius: 50%; text-align: center; line-height: 28px; font-weight: 700; font-size: 0.85rem; margin-right: 10px; }
+    .step-title { font-weight: 600; color: #f1f5f9; font-size: 1.05rem; }
+    .warning { background: #422006; border: 1px solid #92400e; border-radius: 8px; padding: 12px 16px; margin: 12px 0; }
+    .warning::before { content: "⚠️ "; }
+    .success { background: #052e16; border: 1px solid #166534; border-radius: 8px; padding: 12px 16px; margin: 12px 0; }
+    .success::before { content: "✅ "; }
+    .info { background: #0c1929; border: 1px solid #1e40af; border-radius: 8px; padding: 12px 16px; margin: 12px 0; }
+    .info::before { content: "ℹ️ "; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; }
+    th, td { border: 1px solid #334155; padding: 10px 12px; text-align: left; }
+    th { background: #1e293b; color: #7dd3fc; font-weight: 600; }
+    td { color: #cbd5e1; }
+    td code { font-size: 0.85em; }
+    a { color: #38bdf8; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    ul { padding-left: 20px; margin: 8px 0 16px; }
+    li { margin-bottom: 6px; color: #cbd5e1; }
+    ol { padding-left: 20px; margin: 12px 0; }
+    ol li { margin-bottom: 8px; }
+    .toc { background: #1e293b; border-radius: 8px; padding: 16px 20px; margin: 20px 0 32px; }
+    .toc a { display: block; padding: 4px 0; color: #94a3b8; }
+    .toc a:hover { color: #38bdf8; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+<h1>🤖 Bot de PR Autorización</h1>
+<p class="subtitle">Guía paso a paso para instalar y configurar el bot en tu computadora</p>
+
+<div class="toc">
+  <strong style="color: #f1f5f9;">Contenido</strong>
+  <a href="#requisitos">1. Requisitos previos</a>
+  <a href="#instalacion">2. Instalación</a>
+  <a href="#telegram">3. Configurar Telegram</a>
+  <a href="#env">4. Configurar variables de entorno</a>
+  <a href="#ejecutar">5. Ejecutar el bot</a>
+  <a href="#uso">6. Cómo usar el bot</a>
+  <a href="#pm2">7. Mantenerlo corriendo (PM2)</a>
+  <a href="#problemas">8. Solución de problemas</a>
+</div>
+
+<h2 id="requisitos">1. Requisitos previos</h2>
+<p>Necesitas tener instalado en tu Mac:</p>
+<table>
+  <tr><th>Software</th><th>Versión mínima</th><th>Cómo verificar</th></tr>
+  <tr><td>Node.js</td><td>18+</td><td><code>node --version</code></td></tr>
+  <tr><td>npm</td><td>9+</td><td><code>npm --version</code></td></tr>
+  <tr><td>Git</td><td>cualquiera</td><td><code>git --version</code></td></tr>
+</table>
+<p>Si no tienes Node.js:</p>
+<pre><code>brew install node</code></pre>
+
+<h2 id="instalacion">2. Instalación</h2>
+
+<div class="step">
+  <span class="step-number">1</span><span class="step-title">Clonar el repositorio</span>
+  <pre><code>git clone https://bitbucket.org/tu-org/reclutalia-aws-pr-bot.git
+cd reclutalia-aws-pr-bot</code></pre>
+</div>
+
+<div class="step">
+  <span class="step-number">2</span><span class="step-title">Instalar dependencias</span>
+  <pre><code>npm install</code></pre>
+  <div class="info">La primera vez tarda 2-3 minutos porque descarga Chromium.</div>
+</div>
+
+<div class="step">
+  <span class="step-number">3</span><span class="step-title">Copiar archivo de configuración</span>
+  <pre><code>cp .env.example .env</code></pre>
+</div>
+
+<h2 id="telegram">3. Configurar Telegram</h2>
+
+<h3>3.1 — Crear el bot</h3>
+<div class="step">
+  <span class="step-number">1</span><span class="step-title">Hablar con @BotFather</span>
+  <p>En Telegram, busca <code>@BotFather</code> y envía <code>/newbot</code>.</p>
+  <p>Te pedirá nombre y username. El username debe terminar en "bot".</p>
+  <p>BotFather te dará un <strong>token</strong>: <code>7123456789:AAH...</code> → Guárdalo.</p>
+</div>
+
+<h3>3.2 — Crear grupo y agregar el bot</h3>
+<div class="step">
+  <span class="step-number">2</span><span class="step-title">Grupo de Telegram</span>
+  <ul>
+    <li>Crea un grupo nuevo (ej: "PR Autorización")</li>
+    <li>Agrega tu bot al grupo</li>
+    <li>Hazlo <strong>administrador</strong> (necesita leer y enviar mensajes)</li>
+  </ul>
+</div>
+
+<h3>3.3 — Obtener Chat ID del grupo</h3>
+<div class="step">
+  <span class="step-number">3</span><span class="step-title">Chat ID</span>
+  <p>Envía un mensaje en el grupo, luego abre en tu navegador:</p>
+  <pre><code>https://api.telegram.org/bot&lt;TU_TOKEN&gt;/getUpdates</code></pre>
+  <p>Busca <code>"chat":{"id":-100XXXXXXXXXX}</code>. Ese número negativo es tu <code>TELEGRAM_CHAT_ID</code>.</p>
+</div>
+
+<h3>3.4 — (Opcional) Topic ID</h3>
+<p>Si usas Topics en el grupo:</p>
+<ul>
+  <li>Envía mensaje en el topic deseado</li>
+  <li>En <code>getUpdates</code> busca <code>"message_thread_id": 205</code></li>
+  <li>Ese es tu <code>TELEGRAM_TOPIC_ID</code></li>
+</ul>
+
+<h3>3.5 — Tu User ID</h3>
+<div class="step">
+  <span class="step-number">4</span><span class="step-title">User ID</span>
+  <p>Habla con <code>@userinfobot</code> en Telegram. Te da tu ID numérico → <code>TELEGRAM_OWNER_USER_ID</code></p>
+</div>
+
+<h3>3.6 — Usuarios autorizados</h3>
+<div class="warning">Solo los usuarios en <code>TELEGRAM_AUTHORIZED_USERS</code> pueden aprobar/rechazar PRs.</div>
+<p>Pon los usernames de Telegram <strong>sin @</strong>, separados por coma:</p>
+<pre><code>TELEGRAM_AUTHORIZED_USERS=juanalva997,JcLievano,gabrielbarba28</code></pre>
+
+<h2 id="env">4. Configurar variables de entorno</h2>
+<p>Edita <code>.env</code> con tus datos. Aquí todas las variables:</p>
+
+<table>
+  <tr><th>Variable</th><th>Qué poner</th><th>Ejemplo</th></tr>
+  <tr><td><code>TELEGRAM_BOT_TOKEN</code></td><td>Token de BotFather</td><td><code>7123456789:AAH...</code></td></tr>
+  <tr><td><code>TELEGRAM_CHAT_ID</code></td><td>ID del grupo (negativo)</td><td><code>-1001234567890</code></td></tr>
+  <tr><td><code>TELEGRAM_OWNER_USER_ID</code></td><td>Tu User ID</td><td><code>123456789</code></td></tr>
+  <tr><td><code>TELEGRAM_TOPIC_ID</code></td><td>Topic ID (vacío si no usas topics)</td><td><code>205</code></td></tr>
+  <tr><td><code>TELEGRAM_AUTHORIZED_USERS</code></td><td>Usernames autorizados (sin @, por coma)</td><td><code>user1,user2</code></td></tr>
+  <tr><td><code>USER_PROFILES</code></td><td>username:Nombre:email por coma (ver abajo)</td><td></td></tr>
+  <tr><td><code>AWS_LOGIN_URL</code></td><td>URL de login AWS</td><td><code>https://mi-cuenta.signin.aws.amazon.com/console</code></td></tr>
+  <tr><td><code>AWS_ACCOUNT_ID</code></td><td>Alias de la cuenta AWS</td><td><code>mi-cuenta-dev</code></td></tr>
+  <tr><td><code>AWS_USERNAME</code></td><td>Usuario IAM</td><td><code>tu.usuario</code></td></tr>
+  <tr><td><code>AWS_PASSWORD</code></td><td>Contraseña IAM</td><td><code>TuPassword!</code></td></tr>
+  <tr><td><code>HEADLESS</code></td><td><code>true</code> = invisible, <code>false</code> = ves el browser</td><td><code>true</code></td></tr>
+  <tr><td><code>ROLE_AUTHORIZER_URL</code></td><td>URL de switch role Authorizer</td><td><code>https://signin.aws.amazon.com/switchrole?roleName=devops/Authorizer&account=mi-cuenta</code></td></tr>
+  <tr><td><code>ROLE_MANAGER_URL</code></td><td>URL de switch role Manager</td><td><code>https://signin.aws.amazon.com/switchrole?roleName=devops/Manager&account=mi-cuenta</code></td></tr>
+  <tr><td><code>ROLE_MERGE_URL</code></td><td>URL de switch role MergeMaster</td><td><code>https://signin.aws.amazon.com/switchrole?roleName=MergeMaster&account=mi-cuenta</code></td></tr>
+</table>
+
+<h3>USER_PROFILES — Formato</h3>
+<p>Cada perfil tiene 3 campos separados por <code>:</code> y los perfiles se separan por <code>,</code></p>
+<pre><code>USER_PROFILES=username1:Nombre Completo:email@empresa.com,username2:Otro Nombre:otro@empresa.com</code></pre>
+<p>Ejemplo real:</p>
+<pre><code>USER_PROFILES=juanalva997:Juan Alva:juan@empresa.com,jclievano:Juan Carlos:jc@empresa.com</code></pre>
+<div class="info">Los usernames deben coincidir con los de <code>TELEGRAM_AUTHORIZED_USERS</code> (case-insensitive).</div>
+
+<h3>ROLE URLs — Cómo obtenerlas</h3>
+<p>En la consola de AWS, ve a "Switch Role" y copia la URL. El formato es:</p>
+<pre><code>https://signin.aws.amazon.com/switchrole?roleName=NOMBRE_ROL&account=ALIAS_CUENTA</code></pre>
+
+<div class="warning">Nunca compartas tu <code>.env</code>. Está en <code>.gitignore</code> y no se sube al repo.</div>
+
+<h2 id="ejecutar">5. Ejecutar el bot</h2>
+
+<div class="step">
+  <span class="step-number">1</span><span class="step-title">Compilar y ejecutar</span>
+  <pre><code>npm run start</code></pre>
+  <p>Deberías ver:</p>
+  <pre><code>🚀 Iniciando bot de PR Autorización...
+[WS] Servidor WebSocket iniciado en puerto 9876
+🤖 Bot de Telegram iniciado, escuchando mensajes...
+✅ Bot corriendo. Presiona Ctrl+C para detener.</code></pre>
+</div>
+
+<div class="success">Si ves ese mensaje, el bot está funcionando. Pega una URL de PR en el grupo para probar.</div>
+
+<h3>Primera vez: MFA</h3>
+<p>La primera vez te pedirá MFA por DM en Telegram:</p>
+<ul>
+  <li>Ten tu app de MFA lista (Google Authenticator, etc.)</li>
+  <li>Responde con los 6 dígitos cuando el bot te escriba</li>
+  <li>Que el código tenga al menos 20 segundos antes de expirar</li>
+</ul>
+<p>Después guarda la sesión y no vuelve a pedir MFA hasta que expire.</p>
+
+<h2 id="uso">6. Cómo usar el bot</h2>
+
+<h3>Flujo normal</h3>
+<ol>
+  <li>Alguien pega una URL de PR de CodeCommit en el grupo</li>
+  <li>El bot envía botones: ✅ Aprobar / ❌ Rechazar</li>
+  <li>Un usuario autorizado hace click en ✅</li>
+  <li>El bot procesa (approve con 2 roles + merge) automáticamente</li>
+  <li>Reporta resultado en el grupo</li>
+</ol>
+
+<h3>URLs aceptadas</h3>
+<p>El bot detecta URLs de CodeCommit con cualquier tab:</p>
+<pre><code>https://us-east-1.console.aws.amazon.com/codesuite/codecommit/repositories/REPO/pull-requests/12345/details?region=us-east-1
+https://us-east-1.console.aws.amazon.com/codesuite/codecommit/repositories/REPO/pull-requests/12345/commits?region=us-east-1
+https://us-east-1.console.aws.amazon.com/codesuite/codecommit/repositories/REPO/pull-requests/12345/changes?region=us-east-1</code></pre>
+
+<h3>Comandos</h3>
+<table>
+  <tr><th>Comando</th><th>Qué hace</th></tr>
+  <tr><td><code>/status</code></td><td>Estado del bot + cola</td></tr>
+  <tr><td><code>/queue</code></td><td>PRs en cola</td></tr>
+  <tr><td><code>/log</code></td><td>Últimos 5 PRs procesados</td></tr>
+  <tr><td><code>/pr &lt;url&gt;</code></td><td>Agregar PR manualmente</td></tr>
+</table>
+
+<h3>Aprobar por texto</h3>
+<ul>
+  <li><code>si</code> — aprueba (si solo hay un PR pendiente)</li>
+  <li><code>si #29540</code> — aprueba PR específico</li>
+  <li><code>no</code> — rechaza</li>
+</ul>
+
+<h2 id="pm2">7. Mantenerlo corriendo (PM2)</h2>
+
+<div class="step">
+  <span class="step-number">1</span><span class="step-title">Instalar PM2</span>
+  <pre><code>npm install -g pm2</code></pre>
+</div>
+
+<div class="step">
+  <span class="step-number">2</span><span class="step-title">Iniciar con PM2</span>
+  <pre><code>npm run build
+pm2 start dist/main.js --name reclutalia-pr-bot</code></pre>
+</div>
+
+<div class="step">
+  <span class="step-number">3</span><span class="step-title">Comandos útiles</span>
+  <pre><code># Ver estado
+pm2 status
+
+# Logs en tiempo real
+pm2 logs reclutalia-pr-bot
+
+# Reiniciar
+pm2 restart reclutalia-pr-bot
+
+# Detener
+pm2 stop reclutalia-pr-bot
+
+# Que arranque al reiniciar la Mac
+pm2 startup
+pm2 save</code></pre>
+</div>
+
+<h2 id="problemas">8. Solución de problemas</h2>
+
+<h3>El bot no responde en Telegram</h3>
+<ul>
+  <li>Verifica que el bot sea admin del grupo</li>
+  <li>Verifica <code>TELEGRAM_CHAT_ID</code></li>
+  <li>Si usas topics, verifica <code>TELEGRAM_TOPIC_ID</code></li>
+  <li>Logs: <code>pm2 logs reclutalia-pr-bot</code></li>
+</ul>
+
+<h3>"No estás autorizado"</h3>
+<ul>
+  <li>Tu username debe estar en <code>TELEGRAM_AUTHORIZED_USERS</code></li>
+  <li>Sin @, case-insensitive</li>
+  <li>Reinicia el bot después de editar <code>.env</code></li>
+</ul>
+
+<h3>Error de login AWS</h3>
+<ul>
+  <li>Verifica usuario/contraseña en <code>.env</code></li>
+  <li>Si cambió tu password, actualiza y reinicia</li>
+  <li>Borra <code>aws_session.json</code> para forzar login limpio</li>
+</ul>
+
+<h3>"Navigation interrupted"</h3>
+<ul>
+  <li>Es intermitente (~5%). El bot reintenta automáticamente.</li>
+  <li>Si falla, vuelve a aprobar el PR.</li>
+</ul>
+
+<h3>Se queda "procesando" y no avanza</h3>
+<ul>
+  <li><code>pm2 restart reclutalia-pr-bot</code></li>
+  <li>Si persiste, borra <code>aws_session.json</code> y reinicia</li>
+</ul>
+
+<h3>Quiero ver el browser</h3>
+<pre><code>HEADLESS=false</code></pre>
+<p>Reinicia y verás Chromium navegando.</p>
+
+<hr style="border-color: #334155; margin: 40px 0;">
+<p style="text-align: center; color: #64748b; font-size: 0.85rem;">Reclutalia AWS PR Bot — Documentación interna · Junio 2026</p>
+
+</div>
+</body>
+</html>
