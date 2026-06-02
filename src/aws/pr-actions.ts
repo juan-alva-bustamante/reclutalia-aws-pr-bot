@@ -1,7 +1,7 @@
 import type { Page } from "playwright";
 import { config } from "../config.js";
 import { logger } from "../logger.js";
-import { navigateAndWait, waitForAwsLoaders, waitForDomStable, waitForButton, sleep } from "./navigation.js";
+import { navigateAndWait, waitForAwsLoaders, waitForButton, sleep } from "./navigation.js";
 import { dismissPopups } from "./popups.js";
 import type { PrDebugger } from "../history/pr-debug.js";
 
@@ -87,12 +87,20 @@ export async function mergePr(
       debug?.log(`URL no cambió a /merge: ${page.url()}`);
     }
     await waitForAwsLoaders(page, 15_000);
-    await waitForDomStable(page);
     await dismissPopups(page);
+
+    // Esperar a que el formulario de merge renderice (React SPA tarda en montar el contenido)
+    const formRendered = await waitForMergeForm(page);
+    if (!formRendered) {
+      debug?.log("❌ El formulario de merge no renderizó a tiempo");
+      await debug?.screenshot(page, "merge_form_not_rendered");
+      await debug?.saveHtml(page, "merge_form_not_rendered");
+      throw new Error("El formulario de merge no renderizó a tiempo");
+    }
     debug?.log("Página de merge cargada");
     await debug?.screenshot(page, "merge_form_loaded");
 
-    // Seleccionar 3-way merge
+    // Seleccionar 3-way merge (o verificar que ya está seleccionado por default)
     if (!(await selectThreeWayMerge(page))) {
       debug?.log("❌ No se pudo seleccionar 3-way merge");
       await debug?.screenshot(page, "3way_merge_failed");
@@ -203,13 +211,58 @@ async function clickMergeButton(page: Page): Promise<boolean> {
   return false;
 }
 
+/** Espera a que el formulario de merge renderice dentro del SPA */
+async function waitForMergeForm(page: Page): Promise<boolean> {
+  logger.info("[AWS] Esperando que el formulario de merge renderice...");
+  const timeout = 30_000;
+  const start = Date.now();
+
+  while (Date.now() - start < timeout) {
+    const formExists = await page.evaluate(() => {
+      // Indicadores de que el formulario de merge se montó:
+      // 1. Botón "Merge pull request" visible
+      const buttons = Array.from(document.querySelectorAll("button"));
+      const hasMergeBtn = buttons.some(btn => {
+        const text = (btn.innerText || btn.textContent || "").trim().toLowerCase();
+        return text.includes("merge pull request") && btn.offsetParent !== null;
+      });
+      if (hasMergeBtn) return true;
+
+      // 2. Input de Author name existe
+      const inputs = document.querySelectorAll('input[type="text"]');
+      if (inputs.length >= 2) return true;
+
+      // 3. Tiles de merge strategy existen
+      const tiles = document.querySelectorAll('[class*="tiles"], [class*="tile_container"]');
+      if (tiles.length > 0) return true;
+
+      // 4. Texto "3-way merge" existe en la página
+      const allText = document.body?.innerText ?? "";
+      if (allText.includes("3-way merge") || allText.includes("Fast forward")) return true;
+
+      return false;
+    });
+
+    if (formExists) {
+      logger.info("[AWS] ✅ Formulario de merge renderizado");
+      await sleep(1_000); // Extra buffer para que React termine de montar todo
+      return true;
+    }
+
+    await sleep(500);
+  }
+
+  logger.error("[AWS] ❌ Timeout esperando formulario de merge");
+  return false;
+}
+
 async function selectThreeWayMerge(page: Page): Promise<boolean> {
   logger.info("[AWS] Seleccionando 3-way merge...");
 
   // Estrategia 1: locator directo por data-value
   try {
     const tile = page.locator("[data-value='THREE_WAY_MERGE']").first();
-    if (await tile.isVisible({ timeout: 5_000 })) {
+    if (await tile.isVisible({ timeout: 3_000 })) {
       await tile.click({ force: true });
       logger.info("[AWS] ✅ 3-way merge seleccionado via locator [data-value]");
       return true;
@@ -218,25 +271,47 @@ async function selectThreeWayMerge(page: Page): Promise<boolean> {
     /* next */
   }
 
-  // Estrategia 2: evaluate
+  // Estrategia 2: evaluate — buscar por texto "3-way merge" en tiles y hacer click
   const clickedTile = await page.evaluate(() => {
+    // Buscar tile container con data-value
     const tile = document.querySelector<HTMLElement>('[data-value="THREE_WAY_MERGE"]');
     if (tile) {
       tile.click();
-      return "tile-container";
+      return "data-value-tile";
     }
-    const labels = Array.from(document.querySelectorAll<HTMLElement>("span, label"));
-    for (const el of labels) {
-      if (el.textContent?.trim() === "3-way merge") {
+
+    // Buscar por texto "3-way merge" en cualquier elemento clickeable dentro de tiles
+    const allElements = Array.from(document.querySelectorAll<HTMLElement>("*"));
+    for (const el of allElements) {
+      if (el.children.length > 0) continue; // Solo leaf nodes
+      const text = el.textContent?.trim() ?? "";
+      if (text === "3-way merge" || text === "3-way merge\ngit merge --no-ff") {
+        // Subir al contenedor tile (el div clickeable)
+        const tileContainer = el.closest('[class*="tile"], [role="radio"], [class*="awsui_tile"]') as HTMLElement | null;
+        if (tileContainer) {
+          tileContainer.click();
+          return "tile-ancestor";
+        }
+        // Si no hay tile container, click directo en el label/span
         el.click();
-        return "label";
+        return "label-direct";
       }
     }
-    const radios = Array.from(
-      document.querySelectorAll<HTMLInputElement>('input[type="radio"]'),
-    );
+
+    // Buscar el primer tile que contenga "3-way" en su texto
+    const tileElements = Array.from(document.querySelectorAll<HTMLElement>('[class*="awsui_tile"], [class*="tile-"]'));
+    for (const t of tileElements) {
+      const innerText = (t.innerText || t.textContent || "").toLowerCase();
+      if (innerText.includes("3-way")) {
+        t.click();
+        return "tile-class-match";
+      }
+    }
+
+    // Input radio con value THREE_WAY_MERGE
+    const radios = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
     for (const r of radios) {
-      if (r.value === "THREE_WAY_MERGE") {
+      if (r.value === "THREE_WAY_MERGE" || r.value === "three_way_merge") {
         r.click();
         r.checked = true;
         r.dispatchEvent(new Event("change", { bubbles: true }));
@@ -244,6 +319,21 @@ async function selectThreeWayMerge(page: Page): Promise<boolean> {
         return "radio-input";
       }
     }
+
+    // Último intento: buscar radio cuyo label contenga "3-way"
+    for (const r of radios) {
+      const label = r.closest("label") ?? document.querySelector(`label[for="${r.id}"]`);
+      const parentDiv = r.closest('[class*="tile"]') as HTMLElement | null;
+      const context = label?.textContent ?? parentDiv?.textContent ?? "";
+      if (context.toLowerCase().includes("3-way")) {
+        r.click();
+        r.checked = true;
+        r.dispatchEvent(new Event("change", { bubbles: true }));
+        r.dispatchEvent(new Event("input", { bubbles: true }));
+        return "radio-by-label";
+      }
+    }
+
     return null;
   });
 
@@ -252,10 +342,11 @@ async function selectThreeWayMerge(page: Page): Promise<boolean> {
     return true;
   }
 
-  // Estrategia 3: más locators
+  // Estrategia 3: Playwright locators
   for (const sel of [
     "text=3-way merge",
     "label:has-text('3-way')",
+    "[role='radio']:has-text('3-way')",
     "input[value='THREE_WAY_MERGE']",
   ]) {
     try {
@@ -270,11 +361,33 @@ async function selectThreeWayMerge(page: Page): Promise<boolean> {
     }
   }
 
-  // Verificar si ya está seleccionado
+  // Verificar si ya está seleccionado (clase contiene "selected" o aria-checked)
   const alreadySelected = await page.evaluate(() => {
+    // Buscar por data-value
     const tile = document.querySelector('[data-value="THREE_WAY_MERGE"]');
-    return tile?.classList.contains("awsui_selected_vj6p7_1five_423") ||
-      tile?.className.includes("selected") || false;
+    if (tile?.className.includes("selected")) return true;
+    if (tile?.getAttribute("aria-checked") === "true") return true;
+
+    // Buscar cualquier tile/radio con "3-way" que esté seleccionado
+    const allTiles = Array.from(document.querySelectorAll('[class*="tile"], [role="radio"]'));
+    for (const t of allTiles) {
+      const text = (t.textContent ?? "").toLowerCase();
+      if (text.includes("3-way")) {
+        if (t.className.includes("selected") || t.getAttribute("aria-checked") === "true") {
+          return true;
+        }
+      }
+    }
+
+    // Verificar radio inputs
+    const radios = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
+    for (const r of radios) {
+      if ((r.value === "THREE_WAY_MERGE" || r.value === "three_way_merge") && r.checked) {
+        return true;
+      }
+    }
+
+    return false;
   });
 
   if (alreadySelected) {
@@ -313,17 +426,46 @@ async function fillMergeAuthorFields(page: Page, author?: { name: string; email:
   const authorEmail = author?.email ?? config.aws.authorEmail;
 
   logger.info(`[AWS] Llenando Author name: ${authorName}`);
-  const authorOk = await fillReactInput(page, "#awsui-input-0", authorName);
-  if (!authorOk) {
-    await fillReactInput(
-      page,
-      "input[type='text']:not([id*='search']):not([id*='filter'])",
-      authorName,
-    );
+
+  // Los IDs de AWSUI son dinámicos (awsui-input-0, awsui-input-10, etc.)
+  // Buscar los inputs por contexto: el primero después del label "Author name"
+  const authorFilled = await page.evaluate((name: string) => {
+    // Buscar label/texto "Author name" y el input cercano
+    const labels = Array.from(document.querySelectorAll("label, span, div"));
+    for (const lbl of labels) {
+      if (lbl.children.length > 0) continue;
+      const text = (lbl.textContent ?? "").trim().toLowerCase();
+      if (text === "author name") {
+        // Buscar el input más cercano después de este label
+        const container = lbl.closest('[class*="form-field"], [class*="FormField"], div') as HTMLElement | null;
+        const input = container?.querySelector('input[type="text"]') as HTMLInputElement | null;
+        if (input) {
+          input.focus();
+          input.value = name;
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+          return true;
+        }
+      }
+    }
+    return false;
+  }, authorName);
+
+  if (!authorFilled) {
+    // Fallback: buscar por ID pattern awsui-input-*
+    const filled = await fillReactInput(page, "input[id^='awsui-input-'][type='text']", authorName);
+    if (!filled) {
+      await fillReactInput(page, "input[type='text']:not([id*='search']):not([id*='filter'])", authorName);
+    }
+  } else {
+    logger.info("[AWS] ✅ Author name llenado via evaluate");
   }
 
+  // Tab al siguiente campo (Email)
+  await page.keyboard.press("Tab");
+  await sleep(500);
+
   logger.info(`[AWS] Llenando Email: ${authorEmail}`);
-  await sleep(300);
   await page.keyboard.press("Control+a");
   await page.keyboard.press("Backspace");
   await page.keyboard.type(authorEmail, { delay: 40 });
