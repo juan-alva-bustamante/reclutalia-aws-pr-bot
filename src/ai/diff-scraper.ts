@@ -57,22 +57,21 @@ async function extractFileNames(page: Page): Promise<string[]> {
     const files: string[] = [];
 
     // Estrategia 1: Buscar en el panel de archivos de CodeCommit
-    // Los nombres de archivo suelen estar en elementos con path o filename
-    const fileElements = document.querySelectorAll(
+    const fileElements = Array.from(document.querySelectorAll(
       '[class*="file-path"], [class*="filename"], [class*="FilePath"], [data-testid*="file"]'
-    );
+    ));
     for (const el of fileElements) {
       const text = (el.textContent ?? "").trim();
-      if (text && text.includes("/") || text.includes(".")) {
+      if (text && (text.includes("/") || text.includes("."))) {
         files.push(text);
       }
     }
 
     // Estrategia 2: Buscar en headings de secciones de diff
     if (files.length === 0) {
-      const headings = document.querySelectorAll(
+      const headings = Array.from(document.querySelectorAll(
         '[class*="diff-header"] [class*="path"], [class*="DiffHeader"] span'
-      );
+      ));
       for (const el of headings) {
         const text = (el.textContent ?? "").trim();
         if (text && (text.includes("/") || text.includes("."))) {
@@ -83,10 +82,9 @@ async function extractFileNames(page: Page): Promise<string[]> {
 
     // Estrategia 3: Buscar cualquier elemento que parezca un path de archivo
     if (files.length === 0) {
-      const allSpans = document.querySelectorAll("span, div");
+      const allSpans = Array.from(document.querySelectorAll("span, div"));
       for (const el of allSpans) {
         const text = (el.textContent ?? "").trim();
-        // Patrón típico de path: contiene / y termina en extensión
         if (
           text.match(/^[\w\-/.]+\.\w{1,10}$/) &&
           text.includes("/") &&
@@ -108,15 +106,15 @@ async function extractDiffContent(page: Page): Promise<string> {
     const parts: string[] = [];
 
     // Estrategia 1: Buscar contenedores de diff con código
-    const diffContainers = document.querySelectorAll(
+    const diffContainers = Array.from(document.querySelectorAll(
       '[class*="diff-viewer"], [class*="DiffViewer"], [class*="code-diff"], [class*="CodeDiff"]'
-    );
+    ));
 
     if (diffContainers.length > 0) {
       for (const container of diffContainers) {
-        const lines = container.querySelectorAll(
+        const lines = Array.from(container.querySelectorAll(
           '[class*="diff-line"], [class*="code-line"], tr, [class*="Line"]'
-        );
+        ));
         for (const line of lines) {
           const text = (line.textContent ?? "").trimEnd();
           if (text) parts.push(text);
@@ -126,12 +124,11 @@ async function extractDiffContent(page: Page): Promise<string> {
 
     // Estrategia 2: Buscar tablas de diff (formato antiguo)
     if (parts.length === 0) {
-      const tables = document.querySelectorAll('table[class*="diff"], table[class*="code"]');
+      const tables = Array.from(document.querySelectorAll('table[class*="diff"], table[class*="code"]'));
       for (const table of tables) {
-        const rows = table.querySelectorAll("tr");
+        const rows = Array.from(table.querySelectorAll("tr"));
         for (const row of rows) {
           const cells = row.querySelectorAll("td");
-          // La última celda suele tener el código
           const codeCell = cells[cells.length - 1];
           if (codeCell) {
             const text = (codeCell.textContent ?? "").trimEnd();
@@ -143,7 +140,7 @@ async function extractDiffContent(page: Page): Promise<string> {
 
     // Estrategia 3: Buscar pre/code blocks como fallback
     if (parts.length === 0) {
-      const codeBlocks = document.querySelectorAll("pre, code");
+      const codeBlocks = Array.from(document.querySelectorAll("pre, code"));
       for (const block of codeBlocks) {
         const text = (block.textContent ?? "").trim();
         if (text.length > 50) {
