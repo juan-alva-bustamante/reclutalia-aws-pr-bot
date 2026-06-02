@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import type { PrStep, StepStatus, StepSnapshot, QueuePrInfo, WsEvent } from "./events.js";
+import type { PrStep, AiStep, StepStatus, StepSnapshot, QueuePrInfo, WsEvent } from "./events.js";
 
 /**
  * Emisor centralizado de eventos de progreso de PRs.
@@ -106,6 +106,32 @@ class PrEventEmitter extends EventEmitter {
       type: "queue",
       current: this._currentPr,
       pending,
+    });
+  }
+
+  /** Emite progreso de un paso de análisis IA */
+  aiStep(prNumber: string, repo: string, step: AiStep, status: StepStatus, error?: string): void {
+    this.broadcast({
+      type: "ai_step",
+      prNumber,
+      repo,
+      step,
+      status,
+      error,
+      timestamp: now(),
+    });
+  }
+
+  /** Emite resultado del análisis IA */
+  aiResult(prNumber: string, repo: string, success: boolean, summary?: string, filesChanged?: string[]): void {
+    this.broadcast({
+      type: "ai_result",
+      prNumber,
+      repo,
+      success,
+      summary,
+      filesChanged,
+      timestamp: now(),
     });
   }
 

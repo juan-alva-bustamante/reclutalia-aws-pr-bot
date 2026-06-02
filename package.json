@@ -9,7 +9,8 @@
     "start": "npm run build && node dist/main.js",
     "dev": "npm run build && tsx src/main.ts",
     "lint": "eslint src/",
-    "postinstall": "npx playwright install chromium"
+    "postinstall": "npx playwright install chromium",
+    "ai:test": "tsx src/scripts/test-ai-analysis.ts"
   },
   "keywords": [
     "telegram",

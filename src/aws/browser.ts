@@ -71,6 +71,11 @@ export class AWSBrowser {
     return this.page;
   }
 
+  /** Expone el contexto del browser para guardar sesión externamente. */
+  getContext(): BrowserContext | null {
+    return this.context;
+  }
+
   // ── Full PR Flow ───────────────────────────────────────────
 
   async fullPrFlow(

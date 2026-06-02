@@ -15,13 +15,20 @@ y genere un resumen inteligente antes de enviarlo al grupo de Telegram.
 ## Flujo nuevo (con IA)
 
 1. Developer pega URL del PR en Telegram
-2. Bot envía mensaje temporal "⏳ Analizando PR..."
-3. **Bot navega al PR con Playwright y extrae el diff del DOM**
-4. **Ollama (qwen2.5-coder:7b) analiza el diff y genera resumen**
-5. Bot **edita** el mensaje temporal con el resumen enriquecido + botones inline
-6. Flujo de aprobación continúa igual
+2. Bot detecta URL, encola el PR
+3. Bot envía mensaje temporal "⏳ Obteniendo resumen IA..."
+4. Bot emite eventos WebSocket (`ai_login`, `ai_scraping`, `ai_analyzing`) para el widget
+5. **Bot verifica sesión en AWS, hace login si necesario (incluyendo MFA por Telegram)**
+6. **Bot navega al tab "Changes" del PR y extrae el diff del DOM**
+7. **Ollama (qwen2.5-coder:7b) analiza el diff y genera resumen**
+8. Bot borra mensaje temporal
+9. Bot envía mensaje de aprobación con:
+   - Resumen IA + cambios + riesgos + botones ✅/❌ (si IA exitosa)
+   - Solo archivos modificados + botones (si Ollama falla pero scraping OK)
+   - Mensaje estándar + botones (si todo falla o IA deshabilitada)
+10. Flujo de aprobación continúa igual
 
-> Si la IA falla o está deshabilitada, se envía el mensaje original sin cambios (fallback).
+> Si la IA falla en cualquier punto, el flujo no se bloquea — se envía el mensaje con botones de aprobación inmediatamente.
 
 ## Stack de la capa IA
 
@@ -34,9 +41,10 @@ y genere un resumen inteligente antes de enviarlo al grupo de Telegram.
 
 - El diff puede ser muy largo → truncado inteligente por archivo (no cortar a mitad de hunk)
 - Debe ser opcional (`AI_ENABLED=true/false`)
-- No debe bloquear el flujo si la IA falla (graceful fallback)
-- Latencia aceptable: ~15 segundos (no bloquea porque se usa mensaje temporal + editar)
+- No debe bloquear el flujo si la IA falla (graceful fallback escalonado)
+- Latencia aceptable: ~15 segundos (no bloquea porque mensaje temporal se muestra, y botones se envían al final)
 - Sin dependencias externas pesadas (no LangChain, no OpenAI SDK)
+- Emite eventos WebSocket para el widget de monitoreo
 
 ## Decisiones de diseño
 
@@ -45,10 +53,12 @@ y genere un resumen inteligente antes de enviarlo al grupo de Telegram.
 | Playwright para diff (no AWS SDK) | Las credenciales en .env son de sesión browser, no IAM programáticas |
 | Solo Ollama (no OpenAI) | Ya corre localmente, sin costo, suficiente para la tarea |
 | Modelo qwen2.5-coder:7b | Entrenado para código, mejor que llama3 para analizar diffs |
-| Mensaje temporal → editar | No bloquea aprobación mientras IA procesa |
+| Mensaje temporal → borra → nuevo mensaje con botones | Los botones de aprobación siempre llegan con el resumen (o sin él si falla) |
+| Fallback escalonado | IA exitosa > solo archivos > mensaje estándar — nunca se bloquea |
 | Truncado por archivo | Mejor contexto que cortar chars arbitrariamente |
 | Tipos en src/types/ai.types.ts | Convención del proyecto: tipos compartidos en src/types/ |
 | Reutilizar url-parser.ts | No duplicar lógica de parseo de URLs de CodeCommit |
+| Eventos WebSocket para IA | El widget puede mostrar progreso del análisis en tiempo real |
 
 ## Arquitectura — Módulos nuevos
 
@@ -130,11 +140,16 @@ export interface OllamaConfig {
 ### 7. Modificar `src/bot/handlers.ts`
 
 - Al detectar URL de PR:
-  1. Enviar mensaje temporal: "⏳ Analizando PR #{id}..."
-  2. Llamar `analyzePR(page, url)`
-  3. Si retorna `PRAnalysis`, editar mensaje con formato enriquecido
-  4. Si retorna `null`, editar mensaje con formato original + botones
-- Botones de aprobación disponibles desde el inicio (en el mensaje editado)
+  1. Enviar mensaje temporal: "⏳ Obteniendo resumen IA para PR #{id}..."
+  2. Emitir eventos WS (`ai_login`, `ai_scraping`, `ai_analyzing`)
+  3. Login si no hay sesión (con MFA por Telegram si aplica)
+  4. Scrape diff → Ollama → Parse
+  5. Borrar mensaje temporal
+  6. Enviar mensaje de aprobación con botones ✅/❌:
+     - Con resumen IA (si exitoso)
+     - Solo archivos (si Ollama falla pero scraping OK)
+     - Estándar (si todo falla)
+- Si `AI_ENABLED=false`: enviar mensaje estándar directo, sin análisis
 
 ### 8. Modificar `src/config.ts`
 
@@ -150,6 +165,7 @@ OLLAMA_TIMEOUT: number;     // default: 30000 (ms)
 
 ## Formato del mensaje enriquecido (Telegram)
 
+### Con resumen IA (caso exitoso)
 ```
 🔍 *PR detectado*
 `{repo-name}` → PR #{id}
@@ -157,17 +173,32 @@ OLLAMA_TIMEOUT: number;     // default: 30000 (ms)
 📋 *Resumen IA:*
 {summary}
 
-📁 *Archivos modificados ({n}):*
-• archivo1.ts
-• archivo2.ts
+📁 *Cambios principales:*
+• cambio 1
+• cambio 2
 
 ⚠️ *Riesgos detectados:*
 • riesgo 1
 
+⁉ ¿Aprobar este PR?
+[✅ Aprobar] [❌ Rechazar]
+```
+
+### Solo archivos (fallback si Ollama falla)
+```
+🔍 *PR detectado*
+`{repo-name}` → PR #{id}
+
+📁 *Archivos modificados ({n}):*
+• `archivo1.ts`
+• `archivo2.ts`
+
+⁉ ¿Aprobar este PR?
 [✅ Aprobar] [❌ Rechazar]
 ```
 
 > La sección "Riesgos" solo aparece si `risks.length > 0`.
+> La lista de archivos se limita a 15 máximo.
 
 ## Variables de entorno
 
@@ -196,3 +227,35 @@ OLLAMA_TIMEOUT=30000
 - `diff-scraper.ts` necesita investigar los selectores del tab "Changes" en AWS CodeCommit Console. Puede requerir ajustes según la UI actual.
 - El modelo `qwen2.5-coder:7b` tiende a respetar bien instrucciones de formato JSON.
 - Si en el futuro se quiere agregar OpenAI, se crea un segundo cliente en `llm-client.ts` con una factory function. No sobre-ingeniería ahora.
+- El script `npm run ai:test -- "URL"` permite probar el flujo completo sin Telegram.
+- Eventos WebSocket nuevos: `ai_step` (progreso) y `ai_result` (resultado) — el widget puede escucharlos para mostrar el estado del análisis.
+
+## Eventos WebSocket para el widget
+
+### `ai_step` — Progreso del análisis
+
+```json
+{
+  "type": "ai_step",
+  "prNumber": "29537",
+  "repo": "reclutalia",
+  "step": "ai_login" | "ai_scraping" | "ai_analyzing",
+  "status": "in_progress" | "done" | "error",
+  "error": "mensaje de error (opcional)",
+  "timestamp": "2026-06-02T..."
+}
+```
+
+### `ai_result` — Resultado del análisis
+
+```json
+{
+  "type": "ai_result",
+  "prNumber": "29537",
+  "repo": "reclutalia",
+  "success": true,
+  "summary": "Resumen del PR...",
+  "filesChanged": ["src/file1.ts", "src/file2.ts"],
+  "timestamp": "2026-06-02T..."
+}
+```

@@ -1,5 +1,5 @@
 import type { Telegraf } from "telegraf";
-import { Markup, message } from "telegraf/filters";
+import { message } from "telegraf/filters";
 import { config } from "../config.js";
 import { logger } from "../logger.js";
 import { extractAllPrUrls, parsePrInfo } from "../utils/url-parser.js";
@@ -8,7 +8,6 @@ import type { AWSBrowser } from "../aws/browser.js";
 import type { PrInfo } from "../types.js";
 import type { PRAnalysis } from "../types/ai.types.js";
 import { isAuthorized, sendApprovalRequest, sendToTopic } from "./helpers.js";
-import { analyzePR } from "../ai/pr-analyzer.js";
 
 const APPROVE_WORDS = ["si", "sí", "autorizar"];
 const REJECT_WORDS = ["no", "denegar"];
@@ -160,8 +159,14 @@ export function registerHandlers(bot: Telegraf, queue: PrQueue, awsBrowser?: AWS
 
 /**
  * Envía mensaje de aprobación con análisis de IA.
- * 1. Si IA habilitada: envía mensaje temporal → analiza → edita con resultado
- * 2. Si IA deshabilitada o falla: envía el mensaje estándar de aprobación
+ * Flujo:
+ * 1. Envía mensaje temporal "⏳ Obteniendo resumen IA..."
+ * 2. Emite evento WS para el widget
+ * 3. Login si necesario → scrape → Ollama
+ * 4. Borra mensaje temporal
+ * 5. Envía mensaje de aprobación (con resumen IA, solo archivos, o estándar)
+ *
+ * Si IA deshabilitada o login falla: envía directo el mensaje estándar con botones.
  */
 async function sendApprovalWithAnalysis(
   bot: Telegraf,
@@ -169,18 +174,18 @@ async function sendApprovalWithAnalysis(
   prInfo: PrInfo,
   awsBrowser?: AWSBrowser,
 ): Promise<void> {
-  // Si IA no está habilitada o no hay browser, enviar mensaje estándar
+  // Si IA no está habilitada o no hay browser, enviar mensaje estándar directo
   if (!config.ai.enabled || !awsBrowser) {
     await sendApprovalRequest(bot.telegram, chatId, prInfo);
     return;
   }
 
-  // Enviar mensaje temporal
+  // 1. Mensaje temporal
   let tempMessage: { message_id: number } | undefined;
   try {
     tempMessage = await bot.telegram.sendMessage(
       chatId,
-      `⏳ *Analizando PR #${prInfo.prNumber}...*\n📦 Repo: \`${prInfo.repo}\``,
+      `⏳ *Obteniendo resumen IA para PR #${prInfo.prNumber}...*\n📦 Repo: \`${prInfo.repo}\``,
       {
         parse_mode: "Markdown",
         message_thread_id: config.telegram.topicId,
@@ -188,36 +193,98 @@ async function sendApprovalWithAnalysis(
     );
   } catch (e: unknown) {
     logger.warn(`[AI] Error enviando mensaje temporal: ${e}`);
-    await sendApprovalRequest(bot.telegram, chatId, prInfo);
-    return;
   }
 
-  // Intentar análisis con IA
+  // 2. Emitir evento WS para el widget
+  const { prEmitter } = await import("../ws/pr-emitter.js");
+  prEmitter.aiStep(prInfo.prNumber, prInfo.repo, "ai_login", "in_progress");
+
+  // 3. Intentar análisis
   let analysis: PRAnalysis | null = null;
+  let filesChanged: string[] = [];
+
   try {
+    // Login si necesario
     await awsBrowser.ensureStarted();
     const page = awsBrowser.getPage();
-    if (page) {
-      analysis = await analyzePR(page, prInfo.url);
+
+    if (!page) {
+      prEmitter.aiStep(prInfo.prNumber, prInfo.repo, "ai_login", "error", "No se pudo obtener página");
+      throw new Error("No se pudo obtener página del browser");
     }
+
+    // Verificar sesión / login
+    const { isLoggedIn, login, saveSession } = await import("../aws/auth.js");
+    if (!(await isLoggedIn(page))) {
+      logger.info("[AI] Sesión no activa, haciendo login para scraping...");
+      const loginOk = await login(page, awsBrowser.onMfaRequired);
+      if (!loginOk) {
+        prEmitter.aiStep(prInfo.prNumber, prInfo.repo, "ai_login", "error", "Login falló");
+        throw new Error("Login falló para scraping de diff");
+      }
+      const ctx = awsBrowser.getContext();
+      if (ctx) await saveSession(ctx);
+    }
+    prEmitter.aiStep(prInfo.prNumber, prInfo.repo, "ai_login", "done");
+
+    // Scraping del diff
+    prEmitter.aiStep(prInfo.prNumber, prInfo.repo, "ai_scraping", "in_progress");
+    const { scrapeDiff } = await import("../ai/diff-scraper.js");
+    const diffResult = await scrapeDiff(page, prInfo.url);
+    filesChanged = diffResult.filesChanged;
+    prEmitter.aiStep(prInfo.prNumber, prInfo.repo, "ai_scraping", "done");
+
+    // Análisis con Ollama (solo si hay contenido)
+    if (diffResult.content && diffResult.content.trim().length > 0) {
+      prEmitter.aiStep(prInfo.prNumber, prInfo.repo, "ai_analyzing", "in_progress");
+      const { buildPRAnalysisPrompt } = await import("../ai/prompt-builder.js");
+      const { callOllama } = await import("../ai/llm-client.js");
+      const { parseLLMResponse } = await import("../ai/response-parser.js");
+
+      const prompt = buildPRAnalysisPrompt(diffResult.content, filesChanged);
+      const rawResponse = await callOllama(prompt, config.ai.ollama);
+      analysis = parseLLMResponse(rawResponse);
+      prEmitter.aiStep(prInfo.prNumber, prInfo.repo, "ai_analyzing", "done");
+    } else {
+      logger.warn("[AI] Diff vacío, solo se mostrarán archivos");
+    }
+
   } catch (e: unknown) {
-    logger.warn(`[AI] Error en análisis, usando fallback: ${e instanceof Error ? e.message : String(e)}`);
+    logger.warn(`[AI] Error en análisis: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  // Editar mensaje con resultado
+  // 4. Borrar mensaje temporal
+  if (tempMessage) {
+    try {
+      await bot.telegram.deleteMessage(chatId, tempMessage.message_id);
+    } catch (e: unknown) {
+      logger.warn(`[AI] No se pudo borrar mensaje temporal: ${e}`);
+    }
+  }
+
+  // 5. Emitir resultado al widget
+  prEmitter.aiResult(
+    prInfo.prNumber,
+    prInfo.repo,
+    analysis !== null,
+    analysis?.summary,
+    filesChanged,
+  );
+
+  // 6. Enviar mensaje de aprobación con el contenido que se tenga
   const messageText = analysis
     ? formatEnrichedMessage(prInfo, analysis)
-    : formatStandardMessage(prInfo);
+    : filesChanged.length > 0
+      ? formatFilesOnlyMessage(prInfo, filesChanged)
+      : formatStandardMessage(prInfo);
 
   try {
-    await bot.telegram.editMessageText(
+    await bot.telegram.sendMessage(
       chatId,
-      tempMessage.message_id,
-      undefined,
       messageText,
       {
         parse_mode: "Markdown",
-        ...({ message_thread_id: config.telegram.topicId } as Record<string, unknown>),
+        message_thread_id: config.telegram.topicId,
         reply_markup: {
           inline_keyboard: [[
             { text: "✅ Aprobar", callback_data: `approve:${prInfo.prNumber}` },
@@ -227,7 +294,7 @@ async function sendApprovalWithAnalysis(
       },
     );
   } catch (e: unknown) {
-    logger.warn(`[AI] Error editando mensaje, enviando nuevo: ${e}`);
+    logger.warn(`[AI] Error enviando mensaje enriquecido, usando fallback: ${e}`);
     await sendApprovalRequest(bot.telegram, chatId, prInfo);
   }
 }
@@ -253,6 +320,25 @@ function formatEnrichedMessage(prInfo: PrInfo, analysis: PRAnalysis): string {
     }
     msg += "\n";
   }
+
+  msg += `⁉ ¿Aprobar este PR?`;
+  return msg;
+}
+
+/** Formatea mensaje con solo los archivos modificados (fallback cuando IA falla) */
+function formatFilesOnlyMessage(prInfo: PrInfo, files: string[]): string {
+  let msg = `🔍 *PR detectado*\n\`${prInfo.repo}\` → PR #${prInfo.prNumber}\n\n`;
+
+  msg += `📁 *Archivos modificados (${files.length}):*\n`;
+  // Limitar a 15 archivos para no saturar el mensaje
+  const displayFiles = files.slice(0, 15);
+  for (const file of displayFiles) {
+    msg += `• \`${file}\`\n`;
+  }
+  if (files.length > 15) {
+    msg += `• _...y ${files.length - 15} más_\n`;
+  }
+  msg += "\n";
 
   msg += `⁉ ¿Aprobar este PR?`;
   return msg;

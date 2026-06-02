@@ -14,6 +14,9 @@ export type PrStep =
   | "merge"
   | "save_session";
 
+/** Pasos del análisis de IA */
+export type AiStep = "ai_login" | "ai_scraping" | "ai_analyzing";
+
 /** Estado de un paso */
 export type StepStatus = "pending" | "in_progress" | "done" | "error";
 
@@ -25,6 +28,28 @@ export interface StepEvent {
   step: PrStep;
   status: StepStatus;
   error?: string;
+  timestamp: string;
+}
+
+/** Evento de progreso del análisis de IA */
+export interface AiStepEvent {
+  type: "ai_step";
+  prNumber: string;
+  repo: string;
+  step: AiStep;
+  status: StepStatus;
+  error?: string;
+  timestamp: string;
+}
+
+/** Evento de resultado del análisis de IA */
+export interface AiResultEvent {
+  type: "ai_result";
+  prNumber: string;
+  repo: string;
+  success: boolean;
+  summary?: string;
+  filesChanged?: string[];
   timestamp: string;
 }
 
@@ -70,4 +95,4 @@ export interface StepSnapshot {
 }
 
 /** Todos los eventos posibles */
-export type WsEvent = StepEvent | QueueEvent | StatusEvent | InitEvent;
+export type WsEvent = StepEvent | AiStepEvent | AiResultEvent | QueueEvent | StatusEvent | InitEvent;

@@ -20,9 +20,18 @@ Bot de Telegram que automatiza la aprobación y merge de Pull Requests en AWS Co
 ## Flujo principal
 
 1. Un usuario pega una URL de PR de CodeCommit en el grupo de Telegram
-2. El bot envía mensaje temporal "⏳ Analizando PR..."
-3. (Opcional) El bot navega al PR, extrae el diff y lo analiza con Ollama
-4. El bot edita el mensaje con resumen IA + botones inline (o sin resumen si IA deshabilitada/falla)
+2. El bot detecta la URL y la encola
+3. Si `AI_ENABLED=true`:
+   - Envía mensaje temporal "⏳ Obteniendo resumen IA..."
+   - Emite eventos WebSocket (`ai_login`, `ai_scraping`, `ai_analyzing`) para el widget
+   - Login si no hay sesión (incluyendo MFA por Telegram si aplica)
+   - Navega al tab "Changes" del PR → extrae diff del DOM
+   - Llama a Ollama (`qwen2.5-coder:7b`) para generar resumen
+   - Borra mensaje temporal
+4. Envía mensaje de aprobación con botones inline (✅/❌):
+   - Con resumen IA + cambios + riesgos (si IA exitosa)
+   - Solo con lista de archivos modificados (si Ollama falla pero el scraping funcionó)
+   - Mensaje estándar (si IA deshabilitada o todo falla)
 5. Un usuario autorizado aprueba (botón ✅ o texto "si")
 6. El bot ejecuta `fullPrFlow`:
    - Login en AWS Console (o reutiliza sesión guardada)
@@ -66,6 +75,12 @@ src/
 │   ├── aws.types.ts        ← NavigationOptions, RoleConfig
 │   ├── bot.types.ts        ← Tipos del bot
 │   └── ai.types.ts         ← PRAnalysis, DiffResult, OllamaConfig
+├── ws/
+│   ├── events.ts           ← Tipos de eventos WS (incluye AiStep, AiResult)
+│   ├── pr-emitter.ts       ← Emisor singleton de eventos
+│   └── ws-server.ts        ← Servidor WebSocket
+├── scripts/
+│   └── test-ai-analysis.ts ← Script manual para probar análisis IA
 ├── config.ts
 ├── logger.ts
 └── main.ts

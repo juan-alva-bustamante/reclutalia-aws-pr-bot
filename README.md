@@ -59,6 +59,7 @@ Esto toma ~5 minutos por PR, repetido 10-15 veces al día. La fricción atrasa d
 | Runtime | Node.js + TypeScript (strict) | Automatización type-safe |
 | Browser | Playwright (Chromium) | Interacción con AWS Console |
 | Bot | Telegraf | API de Telegram |
+| LLM | Ollama (qwen2.5-coder:7b) | Análisis inteligente de diffs |
 | Cola | Custom (persistencia JSON) | Procesamiento secuencial |
 | Tiempo real | ws (WebSocket) | Eventos de progreso en vivo |
 | Logging | Winston | Logs estructurados con timestamp |
@@ -70,6 +71,12 @@ Esto toma ~5 minutos por PR, repetido 10-15 veces al día. La fricción atrasa d
 
 ```
 src/
+├── ai/
+│   ├── diff-scraper.ts  # Extrae diff del DOM via Playwright
+│   ├── llm-client.ts    # Cliente Ollama (fetch nativo)
+│   ├── prompt-builder.ts # Prompt en español para análisis
+│   ├── response-parser.ts # Extrae JSON de respuesta LLM
+│   └── pr-analyzer.ts   # Orquestador: scrape → prompt → LLM → parse
 ├── aws/
 │   ├── browser.ts       # Lifecycle + orquestación fullPrFlow
 │   ├── auth.ts          # Login, MFA, switch de roles
@@ -79,22 +86,24 @@ src/
 ├── bot/
 │   ├── telegram-bot.ts  # Creación del bot + wiring del procesador
 │   ├── commands.ts      # /status, /queue, /log, /pr
-│   ├── handlers.ts      # Botones inline + aprobación por texto
+│   ├── handlers.ts      # Botones inline + aprobación por texto + integración IA
 │   ├── helpers.ts       # sendToTopic, autorización
 │   └── mfa-handler.ts   # Solicitud/respuesta de MFA por DM
 ├── queue/
 │   └── pr-queue.ts      # Cola secuencial persistente
 ├── ws/
-│   ├── events.ts        # Definición de tipos de eventos
+│   ├── events.ts        # Tipos de eventos WS (incluye AI events)
 │   ├── pr-emitter.ts    # Emisor singleton de eventos
 │   └── ws-server.ts     # Servidor WebSocket (puerto 9876)
 ├── history/
 │   ├── pr-debug.ts      # Screenshots + debug logs por PR
 │   └── pr-log.ts        # Bitácora histórica de resultados
+├── scripts/
+│   └── test-ai-analysis.ts # Script para probar análisis IA manual
 ├── utils/
 │   ├── url-parser.ts    # Detección + normalización de URLs de CodeCommit
 │   └── selectors.ts     # Helper genérico de selectores
-├── types/               # Tipos compartidos
+├── types/               # Tipos compartidos (incluye ai.types.ts)
 ├── config.ts            # Configuración basada en variables de entorno
 ├── logger.ts            # Setup de Winston
 └── main.ts              # Entry point
@@ -143,6 +152,12 @@ HEADLESS=true               # true = browser invisible
 ROLE_AUTHORIZER_URL=        # URL de switch role para Authorizer
 ROLE_MANAGER_URL=           # URL de switch role para Manager
 ROLE_MERGE_URL=             # URL de switch role para MergeMaster
+
+# AI (opcional — requiere Ollama corriendo localmente)
+AI_ENABLED=false            # true/false para habilitar análisis IA
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5-coder:7b
+OLLAMA_TIMEOUT=30000        # Timeout en ms
 ```
 
 ---
@@ -155,6 +170,7 @@ ROLE_MERGE_URL=             # URL de switch role para MergeMaster
 npm run start          # Build + ejecutar
 npm run dev            # Build + ejecutar con tsx
 npm run validate       # Verificar tipos sin compilar
+npm run ai:test -- "URL"  # Probar análisis IA sobre un PR
 ```
 
 ### Producción (PM2)
@@ -177,11 +193,79 @@ pm2 startup && pm2 save   # Auto-arranque al reiniciar
 ### Flujo de aprobación
 
 1. Pegar una URL de PR de CodeCommit en el grupo
-2. El bot envía botones inline (✅ Aprobar / ❌ Rechazar)
-3. Usuario autorizado toca ✅
-4. El bot procesa: login → approve (×2 roles) → merge → reportar resultado
+2. Si IA habilitada: el bot muestra "⏳ Obteniendo resumen IA...", analiza el diff con Ollama, y envía solicitud de aprobación con resumen + riesgos + archivos
+3. Si IA deshabilitada o falla: envía solicitud de aprobación estándar
+4. El bot envía botones inline (✅ Aprobar / ❌ Rechazar)
+5. Usuario autorizado toca ✅
+6. El bot procesa: login → approve (×2 roles) → merge → reportar resultado
 
 Alternativa: responder con `si` o `si #29540` para aprobar por texto.
+
+---
+
+## AI Analysis (opcional)
+
+El bot puede analizar el diff de cada PR usando un LLM local (Ollama) y mostrar un resumen inteligente antes de la aprobación.
+
+### Cómo funciona
+
+```
+URL de PR detectada
+       │
+       ▼
+"⏳ Obteniendo resumen IA..."  +  Evento WS: ai_login
+       │
+       ▼
+Login (si necesario, con MFA)
+       │
+       ▼
+Navega a tab "Changes" → Extrae diff (DOM scraping)  +  WS: ai_scraping
+       │
+       ▼
+Envía diff a Ollama (qwen2.5-coder:7b)  +  WS: ai_analyzing
+       │
+       ▼
+Borra mensaje temporal  +  WS: ai_result
+       │
+       ▼
+Envía solicitud de aprobación enriquecida:
+  • Resumen IA (si exitoso)
+  • Solo archivos modificados (si Ollama falla)
+  • Mensaje estándar (si todo falla)
+```
+
+### Configuración
+
+```bash
+# En .env
+AI_ENABLED=true                          # true/false para habilitar/deshabilitar
+OLLAMA_BASE_URL=http://localhost:11434    # URL de Ollama
+OLLAMA_MODEL=qwen2.5-coder:7b           # Modelo a usar
+OLLAMA_TIMEOUT=30000                     # Timeout en ms
+```
+
+### Requisitos
+
+- [Ollama](https://ollama.ai) corriendo localmente
+- Modelo descargado: `ollama pull qwen2.5-coder:7b`
+
+### Testing manual
+
+```bash
+npm run ai:test -- "URL_DEL_PR"
+```
+
+Ejecuta el análisis completo (login → scraping → Ollama) sin pasar por Telegram.
+
+### Fallbacks
+
+| Situación | Resultado |
+|-----------|-----------|
+| `AI_ENABLED=false` | Mensaje estándar con botones |
+| Login falla | Mensaje estándar con botones |
+| Diff vacío | Solo lista de archivos + botones |
+| Ollama timeout/error | Solo lista de archivos + botones |
+| Todo falla | Mensaje estándar con botones |
 
 ---
 
@@ -199,6 +283,7 @@ Alternativa: responder con `si` o `si #29540` para aprobar por texto.
 
 ## Roadmap
 
+- [x] **AI Analysis** — Resumen inteligente de PRs con Ollama (qwen2.5-coder:7b) antes de la aprobación
 - [ ] **Widget de escritorio** (Electron) — Monitor visual en tiempo real mostrando progreso del pipeline (el servidor WS ya emite eventos)
 - [ ] **Detección de conflictos** — Verificar estado del PR antes de intentar merge, saltar si hay conflictos
 - [ ] **Soporte multi-cuenta** — Manejar PRs en diferentes cuentas AWS / regiones

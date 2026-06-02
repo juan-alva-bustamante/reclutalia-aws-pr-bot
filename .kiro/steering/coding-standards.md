@@ -70,8 +70,17 @@ logger.error("[AWS] ❌ Error en merge: ${e}");
 ### Principios
 
 - La IA es **opcional** — todo el módulo se cortocircuita si `AI_ENABLED=false`
-- Nunca lanzar excepciones que rompan el flujo del bot — `pr-analyzer.ts` siempre retorna `PRAnalysis | null`
+- Nunca lanzar excepciones que rompan el flujo del bot — si falla, se envía mensaje estándar con botones
 - Logging con prefijo `[AI]` + emoji de estado
+- Emitir eventos WebSocket (`ai_step`, `ai_result`) para que el widget muestre progreso
+
+### Flujo de integración en handlers.ts
+
+1. Mensaje temporal "⏳ Obteniendo resumen IA..." (se borra al terminar)
+2. Login propio si no hay sesión (reutiliza `awsBrowser.ensureStarted()`)
+3. Si login falla → fallback a mensaje estándar con botones (no bloquea)
+4. Scrape diff → Ollama → Parse → mensaje de aprobación enriquecido
+5. Fallback escalonado: resumen IA > solo archivos > mensaje estándar
 
 ### Ollama
 
@@ -91,6 +100,11 @@ logger.error("[AWS] ❌ Error en merge: ${e}");
 - El LLM responde en JSON: `{ summary, changes[], risks[] }`
 - El parser usa regex para extraer JSON (no confiar en formato limpio)
 - Si parse falla → valores default, no error
+
+### Script de testing
+
+- `npm run ai:test -- "URL_PR"` ejecuta el análisis aislado (sin Telegram)
+- Útil para validar selectores y respuestas de Ollama
 
 ## Runtime data
 
