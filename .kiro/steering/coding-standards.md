@@ -65,6 +65,33 @@ logger.error("[AWS] ❌ Error en merge: ${e}");
 - Esperar estabilidad del DOM después de acciones que causan redirects
 - Timeout explícito en toda operación de navegación
 
+## Capa IA (src/ai/)
+
+### Principios
+
+- La IA es **opcional** — todo el módulo se cortocircuita si `AI_ENABLED=false`
+- Nunca lanzar excepciones que rompan el flujo del bot — `pr-analyzer.ts` siempre retorna `PRAnalysis | null`
+- Logging con prefijo `[AI]` + emoji de estado
+
+### Ollama
+
+- Llamadas via `fetch` nativo (no SDKs pesados)
+- Timeout con `AbortController` (default 30s)
+- Modelo por env var, no hardcodeado
+
+### Diff scraping
+
+- Reutilizar la instancia de Playwright existente (no crear browser nuevo)
+- Reutilizar `url-parser.ts` para extraer repo/prId de la URL
+- Truncado inteligente: por archivo completo, no cortar a mitad de hunk
+- Límite: 8000 chars máximo al LLM
+
+### Formato de respuesta
+
+- El LLM responde en JSON: `{ summary, changes[], risks[] }`
+- El parser usa regex para extraer JSON (no confiar en formato limpio)
+- Si parse falla → valores default, no error
+
 ## Runtime data
 
 - Screenshots, logs de debug, cola JSON, bitácora → carpeta `data/` en raíz

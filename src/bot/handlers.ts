@@ -1,17 +1,20 @@
 import type { Telegraf } from "telegraf";
-import { message } from "telegraf/filters";
+import { Markup, message } from "telegraf/filters";
 import { config } from "../config.js";
 import { logger } from "../logger.js";
 import { extractAllPrUrls, parsePrInfo } from "../utils/url-parser.js";
 import type { PrQueue } from "../queue/pr-queue.js";
+import type { AWSBrowser } from "../aws/browser.js";
 import type { PrInfo } from "../types.js";
+import type { PRAnalysis } from "../types/ai.types.js";
 import { isAuthorized, sendApprovalRequest, sendToTopic } from "./helpers.js";
+import { analyzePR } from "../ai/pr-analyzer.js";
 
 const APPROVE_WORDS = ["si", "sí", "autorizar"];
 const REJECT_WORDS = ["no", "denegar"];
 
 /** Registra los handlers de botones inline y mensajes de texto */
-export function registerHandlers(bot: Telegraf, queue: PrQueue): void {
+export function registerHandlers(bot: Telegraf, queue: PrQueue, awsBrowser?: AWSBrowser): void {
   // ── Botones inline ──
   bot.action(/^approve:(\d+)$/, async (ctx) => {
     const prNumber = ctx.match[1];
@@ -145,7 +148,7 @@ export function registerHandlers(bot: Telegraf, queue: PrQueue): void {
     }
 
     for (const prInfo of added) {
-      await sendApprovalRequest(bot.telegram, ctx.chat.id, prInfo);
+      await sendApprovalWithAnalysis(bot, ctx.chat.id, prInfo, awsBrowser);
     }
 
     if (duplicates.length > 0) {
@@ -153,4 +156,118 @@ export function registerHandlers(bot: Telegraf, queue: PrQueue): void {
         `ℹ️ Ya en cola: ${duplicates.map((p) => `PR #${p.prNumber}`).join(", ")}`);
     }
   });
+}
+
+/**
+ * Envía mensaje de aprobación con análisis de IA.
+ * 1. Si IA habilitada: envía mensaje temporal → analiza → edita con resultado
+ * 2. Si IA deshabilitada o falla: envía el mensaje estándar de aprobación
+ */
+async function sendApprovalWithAnalysis(
+  bot: Telegraf,
+  chatId: number | string,
+  prInfo: PrInfo,
+  awsBrowser?: AWSBrowser,
+): Promise<void> {
+  // Si IA no está habilitada o no hay browser, enviar mensaje estándar
+  if (!config.ai.enabled || !awsBrowser) {
+    await sendApprovalRequest(bot.telegram, chatId, prInfo);
+    return;
+  }
+
+  // Enviar mensaje temporal
+  let tempMessage: { message_id: number } | undefined;
+  try {
+    tempMessage = await bot.telegram.sendMessage(
+      chatId,
+      `⏳ *Analizando PR #${prInfo.prNumber}...*\n📦 Repo: \`${prInfo.repo}\``,
+      {
+        parse_mode: "Markdown",
+        message_thread_id: config.telegram.topicId,
+      },
+    );
+  } catch (e: unknown) {
+    logger.warn(`[AI] Error enviando mensaje temporal: ${e}`);
+    await sendApprovalRequest(bot.telegram, chatId, prInfo);
+    return;
+  }
+
+  // Intentar análisis con IA
+  let analysis: PRAnalysis | null = null;
+  try {
+    await awsBrowser.ensureStarted();
+    const page = awsBrowser.getPage();
+    if (page) {
+      analysis = await analyzePR(page, prInfo.url);
+    }
+  } catch (e: unknown) {
+    logger.warn(`[AI] Error en análisis, usando fallback: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  // Editar mensaje con resultado
+  const messageText = analysis
+    ? formatEnrichedMessage(prInfo, analysis)
+    : formatStandardMessage(prInfo);
+
+  try {
+    await bot.telegram.editMessageText(
+      chatId,
+      tempMessage.message_id,
+      undefined,
+      messageText,
+      {
+        parse_mode: "Markdown",
+        ...({ message_thread_id: config.telegram.topicId } as Record<string, unknown>),
+        reply_markup: {
+          inline_keyboard: [[
+            { text: "✅ Aprobar", callback_data: `approve:${prInfo.prNumber}` },
+            { text: "❌ Rechazar", callback_data: `reject:${prInfo.prNumber}` },
+          ]],
+        },
+      },
+    );
+  } catch (e: unknown) {
+    logger.warn(`[AI] Error editando mensaje, enviando nuevo: ${e}`);
+    await sendApprovalRequest(bot.telegram, chatId, prInfo);
+  }
+}
+
+/** Formatea el mensaje enriquecido con análisis de IA */
+function formatEnrichedMessage(prInfo: PrInfo, analysis: PRAnalysis): string {
+  let msg = `🔍 *PR detectado*\n\`${prInfo.repo}\` → PR #${prInfo.prNumber}\n\n`;
+
+  msg += `📋 *Resumen IA:*\n${analysis.summary}\n\n`;
+
+  if (analysis.changes.length > 0) {
+    msg += `📁 *Cambios principales:*\n`;
+    for (const change of analysis.changes) {
+      msg += `• ${change}\n`;
+    }
+    msg += "\n";
+  }
+
+  if (analysis.risks.length > 0) {
+    msg += `⚠️ *Riesgos detectados:*\n`;
+    for (const risk of analysis.risks) {
+      msg += `• ${risk}\n`;
+    }
+    msg += "\n";
+  }
+
+  msg += `⁉ ¿Aprobar este PR?`;
+  return msg;
+}
+
+/** Formatea el mensaje estándar (sin IA) */
+function formatStandardMessage(prInfo: PrInfo): string {
+  return (
+    `🔔 *Solicitud de aprobación*\n\n` +
+    `📦 Repo: \`${prInfo.repo}\`\n` +
+    `🔢 PR #: \`${prInfo.prNumber}\`\n\n` +
+    `Antes de Aprobar se recomienda validar:\n` +
+    `▸ Ramas del PR (init-dev, dev-qa, qa-master)\n` +
+    `▸ Quien manda el PR\n` +
+    `▸ Cambios incluidos\n\n` +
+    `⁉ ¿Aprobar este PR?`
+  );
 }

@@ -60,6 +60,14 @@ export const config = {
       name: process.env.ROLE_MERGE_NAME ?? "MergeMaster",
     } satisfies RoleConfig,
   },
+  ai: {
+    enabled: process.env.AI_ENABLED === "true",
+    ollama: {
+      baseUrl: process.env.OLLAMA_BASE_URL ?? "http://localhost:11434",
+      model: process.env.OLLAMA_MODEL ?? "qwen2.5-coder:7b",
+      timeout: Number(process.env.OLLAMA_TIMEOUT ?? "30000"),
+    },
+  },
   sessionFile: "aws_session.json",
   headless: process.env.HEADLESS === "true",
 } as const;

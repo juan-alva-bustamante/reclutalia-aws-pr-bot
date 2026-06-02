@@ -81,7 +81,7 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
   registerCommands(bot, queue);
 
   // 4. Handlers (botones inline + mensajes de texto)
-  registerHandlers(bot, queue);
+  registerHandlers(bot, queue, awsBrowser);
 
   return bot;
 }

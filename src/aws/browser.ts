@@ -66,6 +66,11 @@ export class AWSBrowser {
     return this.page;
   }
 
+  /** Expone la página actual para uso externo (ej: AI diff scraping). Puede ser null si no se ha iniciado. */
+  getPage(): Page | null {
+    return this.page;
+  }
+
   // ── Full PR Flow ───────────────────────────────────────────
 
   async fullPrFlow(

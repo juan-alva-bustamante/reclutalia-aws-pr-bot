@@ -13,25 +13,34 @@ Bot de Telegram que automatiza la aprobación y merge de Pull Requests en AWS Co
 - **Runtime**: Node.js + TypeScript (strict)
 - **Browser automation**: Playwright (Chromium headless)
 - **Bot**: Telegraf (Telegram Bot API)
+- **LLM**: Ollama local (qwen2.5-coder:7b)
 - **Logging**: Winston
 - **Process manager**: PM2
 
 ## Flujo principal
 
 1. Un usuario pega una URL de PR de CodeCommit en el grupo de Telegram
-2. El bot detecta la URL, la encola y envía botones inline pidiendo aprobación
-3. Un usuario autorizado aprueba (botón ✅ o texto "si")
-4. El bot ejecuta `fullPrFlow`:
+2. El bot envía mensaje temporal "⏳ Analizando PR..."
+3. (Opcional) El bot navega al PR, extrae el diff y lo analiza con Ollama
+4. El bot edita el mensaje con resumen IA + botones inline (o sin resumen si IA deshabilitada/falla)
+5. Un usuario autorizado aprueba (botón ✅ o texto "si")
+6. El bot ejecuta `fullPrFlow`:
    - Login en AWS Console (o reutiliza sesión guardada)
    - Switch a rol `devops/Authorizer` → navega al PR → click en "Approve"
    - Switch a rol `devops/Manager` → navega al PR → click en "Approve"
    - Switch a rol `MergeMaster` → navega al PR → ejecuta merge (3-way, llena author, submit)
-5. Reporta resultado por Telegram (éxito o error con detalle)
+7. Reporta resultado por Telegram (éxito o error con detalle)
 
 ## Estructura objetivo (post-refactor)
 
 ```
 src/
+├── ai/                      ← Capa de análisis IA
+│   ├── diff-scraper.ts      ← Extrae diff del PR via Playwright (DOM scraping)
+│   ├── llm-client.ts        ← Cliente Ollama (fetch a localhost:11434)
+│   ├── prompt-builder.ts    ← Construye prompt en español para análisis
+│   ├── response-parser.ts   ← Extrae JSON de respuesta del LLM
+│   └── pr-analyzer.ts       ← Orquestador: scrape → prompt → LLM → parse
 ├── aws/
 │   ├── browser.ts          ← Clase AWSBrowser (lifecycle + orquestación)
 │   ├── navigation.ts       ← navigateAndWait, waitForButton, waitForAwsLoaders, waitForDomStable
@@ -41,7 +50,7 @@ src/
 ├── bot/
 │   ├── telegram-bot.ts     ← Creación del bot y wiring
 │   ├── commands.ts         ← /status, /queue, /log, /pr
-│   ├── handlers.ts         ← Inline buttons, text message handler
+│   ├── handlers.ts         ← Inline buttons, text message handler, integración IA
 │   └── mfa-handler.ts     ← Lógica de MFA por Telegram
 ├── queue/
 │   └── pr-queue.ts         ← Cola con persistencia
@@ -55,7 +64,8 @@ src/
 │   ├── index.ts            ← Re-exports
 │   ├── pr.types.ts         ← PrInfo, PrFlowResult, QueueItem
 │   ├── aws.types.ts        ← NavigationOptions, RoleConfig
-│   └── bot.types.ts        ← Tipos del bot
+│   ├── bot.types.ts        ← Tipos del bot
+│   └── ai.types.ts         ← PRAnalysis, DiffResult, OllamaConfig
 ├── config.ts
 ├── logger.ts
 └── main.ts
