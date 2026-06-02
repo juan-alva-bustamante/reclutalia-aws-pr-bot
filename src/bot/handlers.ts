@@ -147,7 +147,7 @@ export function registerHandlers(bot: Telegraf, queue: PrQueue, awsBrowser?: AWS
     }
 
     for (const prInfo of added) {
-      await sendApprovalWithAnalysis(bot, ctx.chat.id, prInfo, awsBrowser);
+      await sendApprovalWithAnalysis(bot, ctx.chat.id, prInfo, queue, awsBrowser);
     }
 
     if (duplicates.length > 0) {
@@ -172,6 +172,7 @@ async function sendApprovalWithAnalysis(
   bot: Telegraf,
   chatId: number | string,
   prInfo: PrInfo,
+  queue: PrQueue,
   awsBrowser?: AWSBrowser,
 ): Promise<void> {
   // Si IA no está habilitada o no hay browser, enviar mensaje estándar directo
@@ -270,6 +271,11 @@ async function sendApprovalWithAnalysis(
     analysis?.summary,
     filesChanged,
   );
+
+  // 5.1 Guardar resumen IA en la cola (para la bitácora)
+  if (analysis?.summary) {
+    queue.setAiSummary(prInfo.prNumber, analysis.summary);
+  }
 
   // 6. Enviar mensaje de aprobación con el contenido que se tenga
   const messageText = analysis

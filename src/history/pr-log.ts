@@ -19,6 +19,8 @@ export interface PrLogEntry {
   approvedBy?: string;
   authorName?: string;
   authorEmail?: string;
+  /** Resumen generado por la IA (si estuvo disponible) */
+  aiSummary?: string;
 }
 
 /** Registra un PR completado (exitoso o con error) en la bitácora */
@@ -42,6 +44,10 @@ export function logPrResult(entry: PrLogEntry): void {
 
   if (entry.error) {
     lines.push(`   Error:     ${entry.error}`);
+  }
+
+  if (entry.aiSummary) {
+    lines.push(`   🤖 IA:     ${entry.aiSummary}`);
   }
 
   lines.push(SEPARATOR, "");

@@ -22,4 +22,6 @@ export interface QueueItem extends QueueItemInput {
   addedAt: string;
   approvedBy?: string;
   error?: string;
+  /** Resumen generado por la IA (si estuvo disponible al momento del análisis) */
+  aiSummary?: string;
 }

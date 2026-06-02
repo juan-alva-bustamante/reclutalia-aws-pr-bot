@@ -74,6 +74,18 @@ export class PrQueue {
     return item;
   }
 
+  /** Agrega el resumen de IA a un item en la cola */
+  setAiSummary(prNumber: string, summary: string): void {
+    const item = this.items.find(
+      (i) => i.prNumber === prNumber && i.status !== "done" && i.status !== "error",
+    );
+    if (item) {
+      item.aiSummary = summary;
+      this.save();
+      logger.info(`[Queue] AI summary guardado para PR #${prNumber}`);
+    }
+  }
+
   /** PRs esperando aprobación */
   get awaitingApproval(): QueueItem[] {
     return this.items.filter((i) => i.status === "awaiting_approval");

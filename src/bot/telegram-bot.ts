@@ -43,6 +43,7 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
       requestedBy: item.requestedBy,
       approvedBy: item.approvedBy,
       authorName: authorInfo?.name, authorEmail: authorInfo?.email,
+      aiSummary: item.aiSummary,
     });
 
     logger.info("[Bot] Cerrando browser después de procesar PR");
