@@ -1,213 +1,213 @@
 # PR Automation Bot
 
-End-to-end Pull Request approval and merge automation for AWS CodeCommit, orchestrated through Telegram. Reduces a 4-step manual process (login → switch role → approve × 2 → merge) to a single button click.
+Automatización end-to-end de aprobación y merge de Pull Requests en AWS CodeCommit, orquestado desde Telegram. Reduce un proceso manual de 4 pasos (login → switch role → approve × 2 → merge) a un solo tap.
 
 ---
 
-## Problem
+## Problema
 
-Our team manages 30+ microservices in AWS CodeCommit. Each PR requires:
-1. Login to AWS Console
-2. Switch to `devops/Authorizer` role → Approve
-3. Switch to `devops/Manager` role → Approve
-4. Switch to `MergeMaster` role → Execute merge
+El equipo gestiona 30+ microservicios en AWS CodeCommit. Cada PR requiere:
+1. Login en AWS Console
+2. Cambiar a rol `devops/Authorizer` → Aprobar
+3. Cambiar a rol `devops/Manager` → Aprobar
+4. Cambiar a rol `MergeMaster` → Ejecutar merge
 
-This takes ~5 minutes per PR, repeated 10-15 times daily. The friction slows down deployments and creates bottlenecks when the TL is unavailable.
+Esto toma ~5 minutos por PR, repetido 10-15 veces al día. La fricción atrasa deployments y crea cuellos de botella cuando el TL no está disponible.
 
-**This bot automates the entire flow** — a developer posts the PR URL in Telegram, an authorized user approves with one tap, and the bot handles the rest in ~90 seconds.
+**Este bot automatiza el flujo completo** — un desarrollador pega la URL del PR en Telegram, un usuario autorizado aprueba con un tap, y el bot se encarga del resto en ~90 segundos.
 
 ---
 
-## Architecture
+## Arquitectura
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Telegram Group                                                  │
-│  └─ Developer posts PR URL → Bot sends approval request         │
-│  └─ Authorized user taps ✅ → Bot processes PR                  │
+│  Grupo de Telegram                                               │
+│  └─ Developer pega URL del PR → Bot envía solicitud             │
+│  └─ Usuario autorizado toca ✅ → Bot procesa el PR              │
 └──────────────────────────────────┬──────────────────────────────┘
                                    │ Telegraf (Bot API)
 ┌──────────────────────────────────▼──────────────────────────────┐
-│  Node.js Process                                                 │
-│  ├─ Queue (sequential, persistent)                               │
-│  ├─ WebSocket server (real-time status for monitoring widget)    │
-│  └─ Playwright browser automation ──┐                           │
+│  Proceso Node.js                                                 │
+│  ├─ Cola (secuencial, persistente)                               │
+│  ├─ Servidor WebSocket (status en tiempo real para widget)       │
+│  └─ Automatización Playwright ──────┐                           │
 └──────────────────────────────────────┼──────────────────────────┘
-                                       │ Headless Chromium
+                                       │ Chromium Headless
 ┌──────────────────────────────────────▼──────────────────────────┐
 │  AWS Console (CodeCommit)                                        │
-│  ├─ Switch Role: devops/Authorizer → Approve                    │
-│  ├─ Switch Role: devops/Manager → Approve                       │
-│  └─ Switch Role: MergeMaster → 3-way Merge                     │
+│  ├─ Switch Role: devops/Authorizer → Aprobar                    │
+│  ├─ Switch Role: devops/Manager → Aprobar                       │
+│  └─ Switch Role: MergeMaster → Merge 3-way                     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Key Design Decisions
+### Decisiones de diseño
 
-- **Browser automation over API**: CodeCommit's approval system isn't fully exposed via AWS SDK. Using Playwright gives us complete control over the console workflow, including role switching and MFA handling.
-- **Sequential queue**: Only one browser instance runs at a time. PRs are queued and processed in order to avoid session conflicts.
-- **Session persistence**: AWS session cookies are saved to disk, avoiding re-login and MFA on every PR (sessions last ~12 hours).
-- **Retry with backoff**: AWS Console occasionally interrupts navigation during role switches. The bot retries automatically (2 attempts with exponential backoff).
-- **Real-time WebSocket**: A local WS server emits step-by-step progress events for an optional desktop monitoring widget.
-
----
-
-## Tech Stack
-
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| Runtime | Node.js + TypeScript (strict) | Type-safe automation |
-| Browser | Playwright (Chromium) | AWS Console interaction |
-| Bot | Telegraf | Telegram Bot API |
-| Queue | Custom (JSON persistence) | Sequential PR processing |
-| Real-time | ws (WebSocket) | Live progress events |
-| Logging | Winston | Structured, timestamped logs |
-| Process | PM2 | Production daemon management |
+- **Browser automation sobre API**: El sistema de aprobaciones de CodeCommit no está completamente expuesto via AWS SDK. Playwright da control total sobre el flujo de consola, incluyendo switch de roles y MFA.
+- **Cola secuencial**: Solo una instancia de browser corre a la vez. Los PRs se encolan y procesan en orden para evitar conflictos de sesión.
+- **Persistencia de sesión**: Las cookies de AWS se guardan en disco, evitando re-login y MFA en cada PR (las sesiones duran ~12 horas).
+- **Retry con backoff**: AWS Console ocasionalmente interrumpe la navegación durante switch de roles. El bot reintenta automáticamente (2 intentos con backoff exponencial).
+- **WebSocket en tiempo real**: Un servidor WS local emite eventos paso a paso para un widget de monitoreo de escritorio opcional.
 
 ---
 
-## Project Structure
+## Stack tecnológico
+
+| Capa | Tecnología | Propósito |
+|------|-----------|-----------|
+| Runtime | Node.js + TypeScript (strict) | Automatización type-safe |
+| Browser | Playwright (Chromium) | Interacción con AWS Console |
+| Bot | Telegraf | API de Telegram |
+| Cola | Custom (persistencia JSON) | Procesamiento secuencial |
+| Tiempo real | ws (WebSocket) | Eventos de progreso en vivo |
+| Logging | Winston | Logs estructurados con timestamp |
+| Proceso | PM2 | Daemon en producción |
+
+---
+
+## Estructura del proyecto
 
 ```
 src/
 ├── aws/
-│   ├── browser.ts       # Lifecycle + fullPrFlow orchestration
-│   ├── auth.ts          # Login, MFA, role switching
-│   ├── pr-actions.ts    # Approve, merge, form interactions
-│   ├── navigation.ts    # navigateAndWait with retry, DOM stability
-│   └── popups.ts        # Auto-dismiss AWS modals/cookies
+│   ├── browser.ts       # Lifecycle + orquestación fullPrFlow
+│   ├── auth.ts          # Login, MFA, switch de roles
+│   ├── pr-actions.ts    # Approve, merge, interacción con formularios
+│   ├── navigation.ts    # navigateAndWait con retry, estabilidad DOM
+│   └── popups.ts        # Auto-dismiss de modals/cookies de AWS
 ├── bot/
-│   ├── telegram-bot.ts  # Bot creation + queue processor wiring
+│   ├── telegram-bot.ts  # Creación del bot + wiring del procesador
 │   ├── commands.ts      # /status, /queue, /log, /pr
-│   ├── handlers.ts      # Inline buttons + text approval
-│   ├── helpers.ts       # sendToTopic, authorization
-│   └── mfa-handler.ts   # MFA request/response via DM
+│   ├── handlers.ts      # Botones inline + aprobación por texto
+│   ├── helpers.ts       # sendToTopic, autorización
+│   └── mfa-handler.ts   # Solicitud/respuesta de MFA por DM
 ├── queue/
-│   └── pr-queue.ts      # Persistent sequential queue
+│   └── pr-queue.ts      # Cola secuencial persistente
 ├── ws/
-│   ├── events.ts        # Event type definitions
-│   ├── pr-emitter.ts    # Singleton event emitter
-│   └── ws-server.ts     # WebSocket server (port 9876)
+│   ├── events.ts        # Definición de tipos de eventos
+│   ├── pr-emitter.ts    # Emisor singleton de eventos
+│   └── ws-server.ts     # Servidor WebSocket (puerto 9876)
 ├── history/
-│   ├── pr-debug.ts      # Per-PR screenshots + debug logs
-│   └── pr-log.ts        # Historical result log
+│   ├── pr-debug.ts      # Screenshots + debug logs por PR
+│   └── pr-log.ts        # Bitácora histórica de resultados
 ├── utils/
-│   ├── url-parser.ts    # CodeCommit URL detection + normalization
-│   └── selectors.ts     # Generic selector helper
-├── types/               # Shared type definitions
-├── config.ts            # Environment-based configuration
-├── logger.ts            # Winston setup
+│   ├── url-parser.ts    # Detección + normalización de URLs de CodeCommit
+│   └── selectors.ts     # Helper genérico de selectores
+├── types/               # Tipos compartidos
+├── config.ts            # Configuración basada en variables de entorno
+├── logger.ts            # Setup de Winston
 └── main.ts              # Entry point
 ```
 
 ---
 
-## Setup
+## Instalación
 
 ```bash
-# Clone
+# Clonar
 git clone <repo-url>
 cd reclutalia-aws-pr-bot
 
-# Install (also installs Chromium via Playwright)
+# Instalar (también instala Chromium via Playwright)
 npm install
 
-# Configure
+# Configurar
 cp .env.example .env
-# Edit .env with your credentials
+# Editar .env con tus credenciales
 ```
 
-### Environment Variables
+### Variables de entorno
 
 ```bash
 # Telegram
-TELEGRAM_BOT_TOKEN=         # From @BotFather
-TELEGRAM_CHAT_ID=           # Group ID (negative number)
-TELEGRAM_OWNER_USER_ID=     # Your numeric Telegram ID (receives MFA + alerts)
-TELEGRAM_TOPIC_ID=          # Optional: topic thread ID
-TELEGRAM_AUTHORIZED_USERS=  # Usernames allowed to approve (comma-separated, no @)
+TELEGRAM_BOT_TOKEN=         # Token de @BotFather
+TELEGRAM_CHAT_ID=           # ID del grupo (número negativo)
+TELEGRAM_OWNER_USER_ID=     # Tu ID numérico de Telegram (recibe MFA + alertas)
+TELEGRAM_TOPIC_ID=          # Opcional: ID del topic
+TELEGRAM_AUTHORIZED_USERS=  # Usernames autorizados (por coma, sin @)
 
-# User profiles for merge author attribution
-USER_PROFILES=user1:Full Name:email@co.com,user2:Name:email@co.com
+# Perfiles de usuario para atribución del merge
+USER_PROFILES=user1:Nombre Completo:email@empresa.com,user2:Nombre:email@empresa.com
 
 # AWS
-AWS_LOGIN_URL=              # Your AWS Console login URL
-AWS_ACCOUNT_ID=             # Account alias
-AWS_USERNAME=               # IAM username
-AWS_PASSWORD=               # IAM password
-AWS_AUTHOR_NAME=            # Default merge author name
-AWS_AUTHOR_EMAIL=           # Default merge author email
-HEADLESS=true               # true = invisible browser
+AWS_LOGIN_URL=              # URL de login de tu cuenta AWS
+AWS_ACCOUNT_ID=             # Alias de la cuenta
+AWS_USERNAME=               # Usuario IAM
+AWS_PASSWORD=               # Contraseña IAM
+AWS_AUTHOR_NAME=            # Nombre default del autor del merge
+AWS_AUTHOR_EMAIL=           # Email default del autor del merge
+HEADLESS=true               # true = browser invisible
 
-# Role switch URLs (required)
-ROLE_AUTHORIZER_URL=        # Switch role URL for Authorizer
-ROLE_MANAGER_URL=           # Switch role URL for Manager
-ROLE_MERGE_URL=             # Switch role URL for MergeMaster
+# URLs de switch de rol (requeridas)
+ROLE_AUTHORIZER_URL=        # URL de switch role para Authorizer
+ROLE_MANAGER_URL=           # URL de switch role para Manager
+ROLE_MERGE_URL=             # URL de switch role para MergeMaster
 ```
 
 ---
 
-## Usage
+## Uso
 
-### Run
+### Ejecutar
 
 ```bash
-npm run start          # Build + run
-npm run dev            # Build + run with tsx
-npm run validate       # Type-check without emitting
+npm run start          # Build + ejecutar
+npm run dev            # Build + ejecutar con tsx
+npm run validate       # Verificar tipos sin compilar
 ```
 
-### Production (PM2)
+### Producción (PM2)
 
 ```bash
 npm run build
 pm2 start dist/main.js --name pr-bot
-pm2 startup && pm2 save   # Auto-start on reboot
+pm2 startup && pm2 save   # Auto-arranque al reiniciar
 ```
 
-### Telegram Commands
+### Comandos de Telegram
 
-| Command | Description |
+| Comando | Descripción |
 |---------|-------------|
-| `/status` | Bot health + queue summary |
-| `/queue` | Current queue state |
-| `/log` | Last 5 processed PRs |
-| `/pr <url>` | Manually enqueue a PR |
+| `/status` | Estado del bot + resumen de cola |
+| `/queue` | Estado actual de la cola |
+| `/log` | Últimos 5 PRs procesados |
+| `/pr <url>` | Encolar un PR manualmente |
 
-### Approve Flow
+### Flujo de aprobación
 
-1. Post a CodeCommit PR URL in the group
-2. Bot sends inline buttons (✅ Approve / ❌ Reject)
-3. Authorized user taps ✅
-4. Bot processes: login → approve (×2 roles) → merge → report result
+1. Pegar una URL de PR de CodeCommit en el grupo
+2. El bot envía botones inline (✅ Aprobar / ❌ Rechazar)
+3. Usuario autorizado toca ✅
+4. El bot procesa: login → approve (×2 roles) → merge → reportar resultado
 
-Alternative: reply with `si` or `si #29540` to approve by text.
+Alternativa: responder con `si` o `si #29540` para aprobar por texto.
 
 ---
 
-## Engineering Practices
+## Prácticas de ingeniería
 
-- **Modular architecture**: The original 1200-line monolith was refactored into 5 focused modules (~150-290 lines each)
-- **Type safety**: Strict TypeScript, zero `any`, typed error handling (`catch (e: unknown)`)
-- **Resilience**: Auto-retry on navigation interruptions, DOM stability checks, popup auto-dismiss
-- **Observability**: Per-PR debug folders with timestamped screenshots + HTML snapshots at each step
-- **Security**: All credentials in `.env`, no hardcoded secrets, session files in `.gitignore`
-- **Real-time monitoring**: WebSocket server emits granular step events for external consumers
-- **Queue persistence**: Survives process restarts, auto-recovers in-progress items
+- **Arquitectura modular**: El monolito original de 1200 líneas fue refactorizado en 5 módulos enfocados (~150-290 líneas cada uno)
+- **Type safety**: TypeScript strict, cero `any`, manejo de errores tipado (`catch (e: unknown)`)
+- **Resiliencia**: Auto-retry en interrupciones de navegación, checks de estabilidad DOM, auto-dismiss de popups
+- **Observabilidad**: Carpeta de debug por PR con screenshots timestampeados + snapshots HTML en cada paso
+- **Seguridad**: Todas las credenciales en `.env`, cero secretos hardcodeados, archivos de sesión en `.gitignore`
+- **Monitoreo en tiempo real**: Servidor WebSocket emite eventos granulares paso a paso para consumidores externos
+- **Persistencia de cola**: Sobrevive reinicios del proceso, auto-recupera items en progreso
 
 ---
 
 ## Roadmap
 
-- [ ] **Desktop widget** (Electron) — Real-time visual monitor showing pipeline progress (WS server already emits events)
-- [ ] **Conflict detection** — Check PR merge status before attempting, skip if conflicts exist
-- [ ] **Multi-account support** — Handle PRs across different AWS accounts/regions
-- [ ] **Health check endpoint** — HTTP endpoint for uptime monitoring
-- [ ] **Metrics** — Track success rate, average processing time, failure patterns
-- [ ] **Scheduled session refresh** — Proactively renew AWS session before expiry
+- [ ] **Widget de escritorio** (Electron) — Monitor visual en tiempo real mostrando progreso del pipeline (el servidor WS ya emite eventos)
+- [ ] **Detección de conflictos** — Verificar estado del PR antes de intentar merge, saltar si hay conflictos
+- [ ] **Soporte multi-cuenta** — Manejar PRs en diferentes cuentas AWS / regiones
+- [ ] **Health check endpoint** — Endpoint HTTP para monitoreo de uptime
+- [ ] **Métricas** — Trackear tasa de éxito, tiempo promedio de procesamiento, patrones de fallos
+- [ ] **Refresh programado de sesión** — Renovar sesión AWS proactivamente antes de que expire
 
 ---
 
-## Documentation
+## Documentación
 
-Open `docs/guia-instalacion.html` in a browser for a visual step-by-step installation guide (Spanish).
+Abre `docs/guia-instalacion.html` en tu navegador para una guía visual paso a paso de instalación y configuración.
