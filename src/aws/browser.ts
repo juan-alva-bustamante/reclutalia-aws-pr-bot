@@ -18,9 +18,20 @@ export class AWSBrowser {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   private page: Page | null = null;
+  private _busy = false;
 
   /** Callback para solicitar MFA por Telegram. Se inyecta desde el bot. */
   onMfaRequired: MfaCallback | null = null;
+
+  /** Indica si el browser está ocupado ejecutando un flujo (merge o scraping IA) */
+  isBusy(): boolean {
+    return this._busy;
+  }
+
+  /** Permite marcar/desmarcar el browser como ocupado desde fuera (ej: scraping IA) */
+  setBusy(value: boolean): void {
+    this._busy = value;
+  }
 
   // ── Lifecycle ──────────────────────────────────────────────
 
@@ -97,6 +108,7 @@ export class AWSBrowser {
     try {
       // 0. Ensure browser is running
       await this.ensureStarted();
+      this._busy = true;
 
       // 1. Login
       prEmitter.step(prNum, repo, "login", "in_progress");
@@ -207,6 +219,8 @@ export class AWSBrowser {
       debug.log(`❌ Error inesperado: ${e}`);
       prEmitter.errorPr(prNum, repo, result.error);
       try { await debug.screenshot(this.pg, "unexpected_error"); } catch { /* */ }
+    } finally {
+      this._busy = false;
     }
 
     return result;

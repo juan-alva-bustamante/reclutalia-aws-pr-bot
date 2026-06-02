@@ -7,7 +7,7 @@ import type { PrQueue } from "../queue/pr-queue.js";
 import type { AWSBrowser } from "../aws/browser.js";
 import type { PrInfo } from "../types.js";
 import type { PRAnalysis } from "../types/ai.types.js";
-import { isAuthorized, sendApprovalRequest, sendToTopic } from "./helpers.js";
+import { isAuthorized, sendApprovalRequest, sendToTopic, escapeTelegramMarkdown } from "./helpers.js";
 
 const APPROVE_WORDS = ["si", "sí", "autorizar"];
 const REJECT_WORDS = ["no", "denegar"];
@@ -136,18 +136,40 @@ export function registerHandlers(bot: Telegraf, queue: PrQueue, awsBrowser?: AWS
     logger.info(`${parsed.length} PR(s) detectados en mensaje`);
 
     const added: PrInfo[] = [];
+    const queued: PrInfo[] = [];
     const duplicates: PrInfo[] = [];
+
+    const isBusy = awsBrowser?.isBusy() ?? false;
 
     for (const prInfo of parsed) {
       const wasAdded = queue.enqueue({
         url: prInfo.url, repo: prInfo.repo, prNumber: prInfo.prNumber, chatId: ctx.chat.id, requestedBy: ctx.from?.username,
-      });
-      if (wasAdded) added.push(prInfo);
-      else duplicates.push(prInfo);
+      }, isBusy);
+      if (wasAdded) {
+        if (isBusy) queued.push(prInfo);
+        else added.push(prInfo);
+      } else {
+        duplicates.push(prInfo);
+      }
     }
 
+    // PRs que pueden analizarse ahora (browser libre)
     for (const prInfo of added) {
-      await sendApprovalWithAnalysis(bot, ctx.chat.id, prInfo, queue, awsBrowser);
+      // Fire-and-forget: NO await para no bloquear el handler de Telegraf.
+      // Si bloqueamos aquí, el MFA por DM nunca se procesa (deadlock de polling).
+      sendApprovalWithAnalysis(bot, ctx.chat.id, prInfo, queue, awsBrowser).catch((e: unknown) => {
+        logger.error(`[AI] Error no manejado en análisis de PR #${prInfo.prNumber}: ${e}`);
+      });
+    }
+
+    // PRs encolados porque el browser está ocupado — solo mensaje informativo
+    if (queued.length > 0) {
+      const currentPr = queue.currentItem;
+      const queuedList = queued.map((p) => `• PR #${p.prNumber} (\`${p.repo}\`)`).join("\n");
+      await sendToTopic(bot.telegram, ctx.chat.id,
+        `📋 *PR(s) detectado(s) y encolado(s):*\n${queuedList}\n\n` +
+        `⏳ Procesando PR #${currentPr?.prNumber ?? "?"} — se analizarán cuando termine.`,
+      );
     }
 
     if (duplicates.length > 0) {
@@ -205,6 +227,9 @@ async function sendApprovalWithAnalysis(
   let filesChanged: string[] = [];
 
   try {
+    // Marcar browser como ocupado durante el scraping IA
+    awsBrowser.setBusy(true);
+
     // Login si necesario
     await awsBrowser.ensureStarted();
     const page = awsBrowser.getPage();
@@ -252,6 +277,9 @@ async function sendApprovalWithAnalysis(
 
   } catch (e: unknown) {
     logger.warn(`[AI] Error en análisis: ${e instanceof Error ? e.message : String(e)}`);
+  } finally {
+    // Liberar el browser para que otros PRs o el merge puedan usarlo
+    awsBrowser.setBusy(false);
   }
 
   // 4. Borrar mensaje temporal
@@ -274,6 +302,9 @@ async function sendApprovalWithAnalysis(
 
   // 5.1 Guardar resumen IA en la cola (para la bitácora)
   if (analysis?.summary) {
+    logger.info(`[AI] 📝 Resumen: ${analysis.summary}`);
+    if (analysis.changes.length > 0) logger.info(`[AI] 📁 Cambios: ${analysis.changes.join(", ")}`);
+    if (analysis.risks.length > 0) logger.info(`[AI] ⚠️ Riesgos: ${analysis.risks.join(", ")}`);
     queue.setAiSummary(prInfo.prNumber, analysis.summary);
   }
 
@@ -300,8 +331,26 @@ async function sendApprovalWithAnalysis(
       },
     );
   } catch (e: unknown) {
-    logger.warn(`[AI] Error enviando mensaje enriquecido, usando fallback: ${e}`);
-    await sendApprovalRequest(bot.telegram, chatId, prInfo);
+    logger.warn(`[AI] Error enviando mensaje enriquecido con Markdown: ${e}`);
+    // Reintentar sin Markdown
+    try {
+      await bot.telegram.sendMessage(
+        chatId,
+        messageText.replace(/[*`_\\]/g, ""),
+        {
+          message_thread_id: config.telegram.topicId,
+          reply_markup: {
+            inline_keyboard: [[
+              { text: "✅ Aprobar", callback_data: `approve:${prInfo.prNumber}` },
+              { text: "❌ Rechazar", callback_data: `reject:${prInfo.prNumber}` },
+            ]],
+          },
+        },
+      );
+    } catch (e2: unknown) {
+      logger.warn(`[AI] Error enviando sin formato, usando fallback estándar: ${e2}`);
+      await sendApprovalRequest(bot.telegram, chatId, prInfo);
+    }
   }
 }
 
@@ -309,12 +358,12 @@ async function sendApprovalWithAnalysis(
 function formatEnrichedMessage(prInfo: PrInfo, analysis: PRAnalysis): string {
   let msg = `🔍 *PR detectado*\n\`${prInfo.repo}\` → PR #${prInfo.prNumber}\n\n`;
 
-  msg += `📋 *Resumen IA:*\n${analysis.summary}\n\n`;
+  msg += `📋 *Resumen IA:*\n${escapeTelegramMarkdown(analysis.summary)}\n\n`;
 
   if (analysis.changes.length > 0) {
     msg += `📁 *Cambios principales:*\n`;
     for (const change of analysis.changes) {
-      msg += `• ${change}\n`;
+      msg += `• ${escapeTelegramMarkdown(change)}\n`;
     }
     msg += "\n";
   }
@@ -322,7 +371,7 @@ function formatEnrichedMessage(prInfo: PrInfo, analysis: PRAnalysis): string {
   if (analysis.risks.length > 0) {
     msg += `⚠️ *Riesgos detectados:*\n`;
     for (const risk of analysis.risks) {
-      msg += `• ${risk}\n`;
+      msg += `• ${escapeTelegramMarkdown(risk)}\n`;
     }
     msg += "\n";
   }

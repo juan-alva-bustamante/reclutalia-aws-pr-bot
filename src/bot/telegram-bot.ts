@@ -9,6 +9,7 @@ import { sendToTopic } from "./helpers.js";
 import { setupMfaHandler } from "./mfa-handler.js";
 import { registerCommands } from "./commands.js";
 import { registerHandlers } from "./handlers.js";
+import { analyzeAndRequestApproval } from "./pre-merge-analysis.js";
 
 export function createBot(awsBrowser: AWSBrowser): Telegraf {
   const bot = new Telegraf(config.telegram.token);
@@ -17,7 +18,21 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
   // 1. MFA handler (debe ir primero para interceptar DMs del owner)
   setupMfaHandler(bot, awsBrowser);
 
-  // 2. Procesador de la cola
+  // 2. Handler para items `queued` que están listos para IA + aprobación
+  queue.setQueuedReadyHandler(async (item: QueueItem) => {
+    const prInfo: PrInfo = { repo: item.repo, prNumber: item.prNumber, url: item.url };
+    logger.info(`[Bot] PR #${prInfo.prNumber} listo para análisis IA + aprobación`);
+
+    await sendToTopic(bot.telegram, item.chatId,
+      `🔄 *PR #${prInfo.prNumber} listo para análisis*\n📦 Repo: \`${prInfo.repo}\``,
+    );
+
+    // Promover a awaiting_approval y ejecutar análisis IA + enviar botones
+    queue.promoteNextQueued();
+    await analyzeAndRequestApproval(bot, awsBrowser, item, prInfo, queue);
+  });
+
+  // 3. Procesador de la cola (ejecuta merge)
   queue.setProcessor(async (item: QueueItem) => {
     const prInfo: PrInfo = { repo: item.repo, prNumber: item.prNumber, url: item.url };
     const startedAt = new Date().toISOString();
@@ -78,10 +93,10 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
     }
   });
 
-  // 3. Comandos (/status, /queue, /log, /pr)
+  // 4. Comandos (/status, /queue, /log, /pr)
   registerCommands(bot, queue);
 
-  // 4. Handlers (botones inline + mensajes de texto)
+  // 5. Handlers (botones inline + mensajes de texto)
   registerHandlers(bot, queue, awsBrowser);
 
   return bot;

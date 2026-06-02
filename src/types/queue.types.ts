@@ -1,5 +1,6 @@
 /** Estados posibles de un item en la cola */
 export type QueueStatus =
+  | "queued"
   | "awaiting_approval"
   | "pending"
   | "processing"

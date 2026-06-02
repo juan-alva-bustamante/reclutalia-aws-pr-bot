@@ -65,7 +65,7 @@ export interface QueuePrInfo {
   prNumber: string;
   repo: string;
   approvedBy?: string;
-  status: "awaiting_approval" | "pending" | "processing";
+  status: "queued" | "awaiting_approval" | "pending" | "processing";
 }
 
 /** Evento de estado general (idle, procesando, etc.) */

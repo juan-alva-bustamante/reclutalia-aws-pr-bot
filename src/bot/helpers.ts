@@ -28,6 +28,20 @@ export async function sendToTopic(
   }
 }
 
+/**
+ * Escapa caracteres que rompen el Markdown v1 de Telegram en texto generado por IA.
+ * Solo escapar dentro de texto libre (no en formato que nosotros controlamos).
+ */
+export function escapeTelegramMarkdown(text: string): string {
+  // En Markdown v1, los caracteres problemáticos dentro de texto libre son: _ * ` [
+  // No escapar si ya están en un par válido (como *bold* o `code`)
+  // Escapar _ y [ que son los más comunes en respuestas de LLMs
+  return text
+    .replace(/_/g, "\\_")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]");
+}
+
 /** Verifica si un username de Telegram está autorizado */
 export function isAuthorized(username: string | undefined): boolean {
   if (!username) return false;
