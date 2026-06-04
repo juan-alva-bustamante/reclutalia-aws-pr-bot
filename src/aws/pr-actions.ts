@@ -427,51 +427,135 @@ async function fillMergeAuthorFields(page: Page, author?: { name: string; email:
 
   logger.info(`[AWS] Llenando Author name: ${authorName}`);
 
-  // Los IDs de AWSUI son dinámicos (awsui-input-0, awsui-input-10, etc.)
-  // Buscar los inputs por contexto: el primero después del label "Author name"
-  const authorFilled = await page.evaluate((name: string) => {
-    // Buscar label/texto "Author name" y el input cercano
+  // Estrategia: buscar el input por contexto de label "Author name" y llenarlo con interacción real
+  let authorInputFilled = false;
+
+  // Intentar localizar el input de Author name por label y hacer click + type (interacción real)
+  const authorInputFound = await page.evaluate(() => {
     const labels = Array.from(document.querySelectorAll("label, span, div"));
     for (const lbl of labels) {
       if (lbl.children.length > 0) continue;
       const text = (lbl.textContent ?? "").trim().toLowerCase();
       if (text === "author name") {
-        // Buscar el input más cercano después de este label
         const container = lbl.closest('[class*="form-field"], [class*="FormField"], div') as HTMLElement | null;
         const input = container?.querySelector('input[type="text"]') as HTMLInputElement | null;
         if (input) {
+          input.scrollIntoView({ behavior: "instant", block: "center" });
           input.focus();
-          input.value = name;
-          input.dispatchEvent(new Event("input", { bubbles: true }));
-          input.dispatchEvent(new Event("change", { bubbles: true }));
+          input.click();
           return true;
         }
       }
     }
     return false;
-  }, authorName);
+  });
 
-  if (!authorFilled) {
-    // Fallback: buscar por ID pattern awsui-input-*
-    const filled = await fillReactInput(page, "input[id^='awsui-input-'][type='text']", authorName);
-    if (!filled) {
-      await fillReactInput(page, "input[type='text']:not([id*='search']):not([id*='filter'])", authorName);
-    }
+  if (authorInputFound) {
+    // El foco real está en el input de Author name — escribir con keyboard
+    await page.keyboard.press("Control+a");
+    await page.keyboard.press("Backspace");
+    await page.keyboard.type(authorName, { delay: 40 });
+    logger.info("[AWS] ✅ Author name llenado via focus + keyboard");
+    authorInputFilled = true;
   } else {
-    logger.info("[AWS] ✅ Author name llenado via evaluate");
+    // Fallback: buscar por ID pattern awsui-input-*
+    authorInputFilled = await fillReactInput(page, "input[id^='awsui-input-'][type='text']", authorName);
+    if (!authorInputFilled) {
+      authorInputFilled = await fillReactInput(page, "input[type='text']:not([id*='search']):not([id*='filter'])", authorName);
+    }
   }
 
-  // Tab al siguiente campo (Email)
-  await page.keyboard.press("Tab");
+  // Ahora llenar Email address
   await sleep(500);
-
   logger.info(`[AWS] Llenando Email: ${authorEmail}`);
-  await page.keyboard.press("Control+a");
-  await page.keyboard.press("Backspace");
-  await page.keyboard.type(authorEmail, { delay: 40 });
-  await page.keyboard.press("Tab");
-  await sleep(300);
-  logger.info("[AWS] ✅ Email llenado");
+
+  // Estrategia 1: Tab desde Author name (el foco debería estar ahí tras escribir)
+  if (authorInputFilled) {
+    await page.keyboard.press("Tab");
+    await sleep(500);
+
+    // Verificar si el foco cayó en el input de Email address
+    const focusedOnEmail = await page.evaluate(() => {
+      const active = document.activeElement as HTMLInputElement | null;
+      if (active?.tagName === "INPUT" && active.type === "text") {
+        // Verificar que el input está en el contexto de "Email address"
+        const container = active.closest('[class*="form-field"], [class*="FormField"], div') as HTMLElement | null;
+        const containerText = (container?.textContent ?? "").toLowerCase();
+        if (containerText.includes("email")) return true;
+        // Si no tiene contexto de email, verificar que no es el de Author name
+        if (!containerText.includes("author name")) return true;
+      }
+      return false;
+    });
+
+    if (focusedOnEmail) {
+      await page.keyboard.press("Control+a");
+      await page.keyboard.press("Backspace");
+      await page.keyboard.type(authorEmail, { delay: 40 });
+      await page.keyboard.press("Tab");
+      await sleep(300);
+      logger.info("[AWS] ✅ Email llenado via Tab desde Author name");
+      return;
+    }
+
+    logger.warn("[AWS] ⚠️ Tab no llevó al campo Email, buscando por label...");
+  }
+
+  // Estrategia 2: Localizar el input de Email directamente por su label
+  const emailInputFound = await page.evaluate(() => {
+    const labels = Array.from(document.querySelectorAll("label, span, div"));
+    for (const lbl of labels) {
+      if (lbl.children.length > 0) continue;
+      const text = (lbl.textContent ?? "").trim().toLowerCase();
+      if (text === "email address") {
+        const container = lbl.closest('[class*="form-field"], [class*="FormField"], div') as HTMLElement | null;
+        const input = container?.querySelector('input[type="text"]') as HTMLInputElement | null;
+        if (input) {
+          input.scrollIntoView({ behavior: "instant", block: "center" });
+          input.focus();
+          input.click();
+          return true;
+        }
+      }
+    }
+    return false;
+  });
+
+  if (emailInputFound) {
+    await page.keyboard.press("Control+a");
+    await page.keyboard.press("Backspace");
+    await page.keyboard.type(authorEmail, { delay: 40 });
+    await page.keyboard.press("Tab");
+    await sleep(300);
+    logger.info("[AWS] ✅ Email llenado via localización directa por label");
+    return;
+  }
+
+  // Estrategia 3: Buscar el segundo input de texto en la página de merge
+  logger.warn("[AWS] ⚠️ No se encontró input de Email por label, intentando segundo input...");
+  const secondInputFilled = await page.evaluate((email: string) => {
+    const inputs = Array.from(document.querySelectorAll<HTMLInputElement>(
+      'input[type="text"]:not([id*="search"]):not([id*="filter"])'
+    )).filter(inp => inp.offsetParent !== null);
+    // El segundo input visible de tipo texto debería ser Email
+    if (inputs.length >= 2) {
+      const emailInput = inputs[1];
+      emailInput.scrollIntoView({ behavior: "instant", block: "center" });
+      emailInput.focus();
+      emailInput.click();
+      emailInput.value = email;
+      emailInput.dispatchEvent(new Event("input", { bubbles: true }));
+      emailInput.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    }
+    return false;
+  }, authorEmail);
+
+  if (secondInputFilled) {
+    logger.info("[AWS] ✅ Email llenado via segundo input de texto");
+  } else {
+    logger.error("[AWS] ❌ No se pudo llenar el campo Email address");
+  }
 }
 
 async function uncheckDeleteBranch(page: Page): Promise<void> {
