@@ -173,26 +173,38 @@ export async function saveSession(context: BrowserContext): Promise<void> {
 async function waitForManualMfa(page: Page, onMfaRequired: MfaCallback | null): Promise<void> {
   try {
     await dismissPopups(page);
-    const mfaField = page
-      .locator(
-        [
-          "#mfaCode",
-          "input[name='mfaCode']",
-          "input[placeholder*='MFA']",
-          "input[placeholder*='code']",
-          "input[autocomplete='one-time-code']",
-        ].join(", "),
-      )
-      .first();
 
-    if (!(await mfaField.isVisible({ timeout: 8_000 }))) return;
+    // Selectores para campo MFA — incluye variantes de pantalla OAuth
+    const mfaSelectors = [
+      "#mfaCode",
+      "input[name='mfaCode']",
+      "input[placeholder*='MFA']",
+      "input[placeholder*='code']",
+      "input[placeholder*='Code']",
+      "input[autocomplete='one-time-code']",
+      // Pantalla OAuth de AWS ("Additional verification required")
+      "input[type='text'][name*='mfa']",
+      "input[type='text'][id*='mfa']",
+      "input[type='tel']",
+    ];
+
+    const mfaField = page.locator(mfaSelectors.join(", ")).first();
+
+    // Timeout de 15s para cubrir redirects lentos (OAuth, SSO)
+    if (!(await mfaField.isVisible({ timeout: 15_000 }))) {
+      logger.info("[AWS] No se detectó pantalla MFA en 15s, continuando...");
+      return;
+    }
 
     logger.info("[AWS] 🔐 Pantalla MFA detectada");
+    logger.info(`[AWS] URL actual: ${page.url()}`);
+    logger.info(`[AWS] onMfaRequired callback: ${onMfaRequired ? "configurado ✅" : "❌ NULL"}`);
 
     // Intentar obtener MFA por Telegram
     if (onMfaRequired) {
-      logger.info("[AWS] Solicitando MFA por Telegram...");
+      logger.info("[AWS] 📲 Enviando solicitud MFA por Telegram al owner...");
       const code = await onMfaRequired();
+      logger.info(`[AWS] Respuesta de onMfaRequired: ${code ? `código recibido (${code.length} chars)` : "null/vacío"}`);
 
       if (code && /^\d{6}$/.test(code)) {
         logger.info("[AWS] MFA recibido por Telegram, ingresando...");
@@ -278,7 +290,9 @@ async function waitForManualMfa(page: Page, onMfaRequired: MfaCallback | null): 
         logger.info("[AWS] ✅ MFA completado por Telegram");
         return;
       }
-      logger.warn("[AWS] MFA no recibido o inválido, esperando ingreso manual...");
+      logger.warn("[AWS] ⚠️ MFA no recibido o inválido por Telegram, cayendo a espera manual...");
+    } else {
+      logger.warn("[AWS] ⚠️ onMfaRequired es null — no hay callback para solicitar MFA por Telegram");
     }
 
     // Fallback: esperar ingreso manual

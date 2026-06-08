@@ -16,12 +16,17 @@ export function setupMfaHandler(bot: Telegraf, awsBrowser: AWSBrowser): void {
     return new Promise<string | null>((resolve) => {
       mfaResolve = resolve;
 
+      logger.info(`[Bot] 📲 Enviando DM de MFA al owner (userId: ${config.telegram.ownerUserId})...`);
+
       bot.telegram.sendMessage(
         config.telegram.ownerUserId,
         `🔐 *Se requiere código MFA*\nAsegurate que el token tenga minimo 20 seg de expiración.\n\nEnvía tu código de 6 dígitos aquí:`,
         { parse_mode: "Markdown" },
-      ).catch((e: unknown) => {
-        logger.error(`[Bot] Error pidiendo MFA por DM: ${e}`);
+      ).then(() => {
+        logger.info("[Bot] ✅ DM de MFA enviado al owner, esperando respuesta...");
+      }).catch((e: unknown) => {
+        logger.error(`[Bot] ❌ Error enviando DM de MFA al owner (userId: ${config.telegram.ownerUserId}): ${e}`);
+        mfaResolve = null;
         resolve(null);
       });
 

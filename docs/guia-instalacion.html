@@ -56,7 +56,8 @@
   <a href="#ejecutar">5. Ejecutar el bot</a>
   <a href="#uso">6. Cómo usar el bot</a>
   <a href="#pm2">7. Mantenerlo corriendo (PM2)</a>
-  <a href="#problemas">8. Solución de problemas</a>
+  <a href="#ia">8. Análisis con IA (opcional)</a>
+  <a href="#problemas">9. Solución de problemas</a>
 </div>
 
 <h2 id="requisitos">1. Requisitos previos</h2>
@@ -155,6 +156,12 @@ cd reclutalia-aws-pr-bot</code></pre>
   <tr><td><code>ROLE_AUTHORIZER_URL</code></td><td>URL de switch role Authorizer</td><td><code>https://signin.aws.amazon.com/switchrole?roleName=devops/Authorizer&account=mi-cuenta</code></td></tr>
   <tr><td><code>ROLE_MANAGER_URL</code></td><td>URL de switch role Manager</td><td><code>https://signin.aws.amazon.com/switchrole?roleName=devops/Manager&account=mi-cuenta</code></td></tr>
   <tr><td><code>ROLE_MERGE_URL</code></td><td>URL de switch role MergeMaster</td><td><code>https://signin.aws.amazon.com/switchrole?roleName=MergeMaster&account=mi-cuenta</code></td></tr>
+  <tr><td><code>AWS_AUTHOR_NAME</code></td><td>Nombre default del autor del merge</td><td><code>Bot Merge</code></td></tr>
+  <tr><td><code>AWS_AUTHOR_EMAIL</code></td><td>Email default del autor del merge</td><td><code>bot@merge.local</code></td></tr>
+  <tr><td><code>AI_ENABLED</code></td><td><code>true</code> para habilitar análisis IA</td><td><code>false</code></td></tr>
+  <tr><td><code>OLLAMA_BASE_URL</code></td><td>URL de Ollama local</td><td><code>http://localhost:11434</code></td></tr>
+  <tr><td><code>OLLAMA_MODEL</code></td><td>Modelo LLM a usar</td><td><code>qwen2.5-coder:7b</code></td></tr>
+  <tr><td><code>OLLAMA_TIMEOUT</code></td><td>Timeout en ms para el LLM</td><td><code>30000</code></td></tr>
 </table>
 
 <h3>USER_PROFILES — Formato</h3>
@@ -258,7 +265,61 @@ pm2 startup
 pm2 save</code></pre>
 </div>
 
-<h2 id="problemas">8. Solución de problemas</h2>
+<h2 id="ia">8. Análisis con IA (opcional)</h2>
+
+<p>El bot puede analizar el diff de cada PR usando un LLM local (<a href="https://ollama.ai">Ollama</a>) y mostrar un resumen inteligente antes de la aprobación.</p>
+
+<h3>8.1 — Instalar Ollama</h3>
+<div class="step">
+  <span class="step-number">1</span><span class="step-title">Descargar Ollama</span>
+  <p>Descarga desde <a href="https://ollama.ai">ollama.ai</a> e instala la app de macOS.</p>
+  <pre><code># Verificar que esté corriendo
+curl http://localhost:11434/api/tags</code></pre>
+</div>
+
+<div class="step">
+  <span class="step-number">2</span><span class="step-title">Descargar el modelo</span>
+  <pre><code>ollama pull qwen2.5-coder:7b</code></pre>
+  <div class="info">La primera vez descarga ~4.5 GB. Solo se hace una vez.</div>
+</div>
+
+<h3>8.2 — Habilitar en el bot</h3>
+<div class="step">
+  <span class="step-number">3</span><span class="step-title">Editar .env</span>
+  <pre><code>AI_ENABLED=true
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5-coder:7b
+OLLAMA_TIMEOUT=30000</code></pre>
+  <p>Reinicia el bot después de cambiar estas variables.</p>
+</div>
+
+<h3>8.3 — Cómo funciona</h3>
+<ol>
+  <li>Se detecta URL de PR → el bot envía "⏳ Obteniendo resumen IA..."</li>
+  <li>Login en AWS si no hay sesión activa (puede pedir MFA)</li>
+  <li>Navega al tab "Changes" del PR → extrae el diff del DOM</li>
+  <li>Envía el diff a Ollama para análisis</li>
+  <li>Muestra resumen + cambios + riesgos en el mensaje de aprobación</li>
+</ol>
+
+<h3>8.4 — Fallbacks</h3>
+<p>Si algo falla, el bot nunca se rompe:</p>
+<table>
+  <tr><th>Situación</th><th>Resultado</th></tr>
+  <tr><td><code>AI_ENABLED=false</code></td><td>Mensaje estándar con botones</td></tr>
+  <tr><td>Login falla</td><td>Mensaje estándar con botones</td></tr>
+  <tr><td>Diff vacío</td><td>Solo lista de archivos + botones</td></tr>
+  <tr><td>Ollama timeout o error</td><td>Solo lista de archivos + botones</td></tr>
+  <tr><td>Todo falla</td><td>Mensaje estándar con botones</td></tr>
+</table>
+
+<h3>8.5 — Probar manualmente</h3>
+<pre><code>npm run ai:test -- "URL_DEL_PR"</code></pre>
+<p>Ejecuta login → scraping → Ollama sin pasar por Telegram. Útil para validar que todo funciona.</p>
+
+<div class="warning">Si Ollama no está corriendo o el modelo no está descargado, el análisis falla silenciosamente y se envía el mensaje estándar.</div>
+
+<h2 id="problemas">9. Solución de problemas</h2>
 
 <h3>El bot no responde en Telegram</h3>
 <ul>

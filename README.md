@@ -84,11 +84,12 @@ src/
 │   ├── navigation.ts    # navigateAndWait con retry, estabilidad DOM
 │   └── popups.ts        # Auto-dismiss de modals/cookies de AWS
 ├── bot/
-│   ├── telegram-bot.ts  # Creación del bot + wiring del procesador
-│   ├── commands.ts      # /status, /queue, /log, /pr
-│   ├── handlers.ts      # Botones inline + aprobación por texto + integración IA
-│   ├── helpers.ts       # sendToTopic, autorización
-│   └── mfa-handler.ts   # Solicitud/respuesta de MFA por DM
+│   ├── telegram-bot.ts       # Creación del bot + wiring del procesador
+│   ├── commands.ts           # /status, /queue, /log, /pr
+│   ├── handlers.ts           # Botones inline + aprobación por texto + integración IA
+│   ├── helpers.ts            # sendToTopic, autorización
+│   ├── mfa-handler.ts        # Solicitud/respuesta de MFA por DM
+│   └── pre-merge-analysis.ts # Análisis IA cuando un PR sale de la cola
 ├── queue/
 │   └── pr-queue.ts      # Cola secuencial persistente
 ├── ws/
@@ -103,7 +104,8 @@ src/
 ├── utils/
 │   ├── url-parser.ts    # Detección + normalización de URLs de CodeCommit
 │   └── selectors.ts     # Helper genérico de selectores
-├── types/               # Tipos compartidos (incluye ai.types.ts)
+├── types/               # Tipos compartidos (pr, aws, ai, queue)
+├── types.ts             # Re-exports de tipos principales (PrInfo, PrFlowResult, etc.)
 ├── config.ts            # Configuración basada en variables de entorno
 ├── logger.ts            # Setup de Winston
 └── main.ts              # Entry point
@@ -153,6 +155,14 @@ ROLE_AUTHORIZER_URL=        # URL de switch role para Authorizer
 ROLE_MANAGER_URL=           # URL de switch role para Manager
 ROLE_MERGE_URL=             # URL de switch role para MergeMaster
 
+# Nombres de los roles (opcionales — tienen defaults)
+# ROLE_AUTHORIZER_NAME=devops/Authorizer
+# ROLE_MANAGER_NAME=devops/Manager
+# ROLE_MERGE_NAME=MergeMaster
+
+# WebSocket (opcional)
+# WS_PORT=9876              # Puerto del servidor WS para widget de monitoreo (default: 9876)
+
 # AI (opcional — requiere Ollama corriendo localmente)
 AI_ENABLED=false            # true/false para habilitar análisis IA
 OLLAMA_BASE_URL=http://localhost:11434
@@ -177,7 +187,7 @@ npm run ai:test -- "URL"  # Probar análisis IA sobre un PR
 
 ```bash
 npm run build
-pm2 start dist/main.js --name pr-bot
+pm2 start dist/main.js --name reclutalia-pr-bot
 pm2 startup && pm2 save   # Auto-arranque al reiniciar
 ```
 
