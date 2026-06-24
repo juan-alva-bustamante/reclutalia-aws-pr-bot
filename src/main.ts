@@ -6,6 +6,18 @@ import { startWsServer, stopWsServer } from "./ws/ws-server.js";
 async function main(): Promise<void> {
   logger.info("🚀 Iniciando bot de PR Autorización...");
 
+  // Protección contra errores no capturados — el bot NO debe crashear por errores de Telegram
+  process.on("unhandledRejection", (reason) => {
+    logger.error(`[Process] Unhandled Rejection: ${reason}`);
+  });
+  process.on("uncaughtException", (err) => {
+    logger.error(`[Process] Uncaught Exception: ${err.message}`);
+    // Solo crashear si es un error crítico (no errores de red/Telegram)
+    if (err.message.includes("ENOMEM") || err.message.includes("Cannot find module")) {
+      process.exit(1);
+    }
+  });
+
   // Iniciar WebSocket server para el widget
   startWsServer();
 

@@ -14,18 +14,21 @@ export class PrQueue {
 
   constructor() {
     this.load();
-    // Al iniciar, si hay items `queued` y no hay nada procesándose ni pendiente de aprobar,
-    // promover el primero para que inicie su flujo de IA + aprobación.
-    if (this.queuedItems.length > 0 && !this.currentItem && this.awaitingApproval.length === 0 && this.pendingCount === 0) {
-      // Se procesará cuando setQueuedReadyHandler sea llamado (después del constructor)
-      setTimeout(() => {
-        if (this.onQueuedReady && this.queuedItems.length > 0 && !this.processing) {
+    // Recovery al iniciar:
+    // 1. Si hay items `pending` (PRs aprobados que no se procesaron por crash), procesarlos
+    // 2. Si hay items `queued` y no hay nada más activo, promover el primero para IA + aprobación
+    setTimeout(() => {
+      if (this.pendingCount > 0 && this.onProcess && !this.processing) {
+        logger.info(`[Queue] ${this.pendingCount} PR(s) pendientes al iniciar, procesando...`);
+        void this.processNext();
+      } else if (this.queuedItems.length > 0 && !this.currentItem && this.awaitingApproval.length === 0 && this.pendingCount === 0) {
+        if (this.onQueuedReady && !this.processing) {
           const next = this.queuedItems[0];
           logger.info(`[Queue] Promoviendo PR #${next.prNumber} de queued al iniciar`);
           void this.onQueuedReady(next);
         }
-      }, 2_000);
-    }
+      }
+    }, 2_000);
   }
 
   /** Registra el callback que procesa cada PR */

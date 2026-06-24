@@ -41,11 +41,15 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
     const approverDisplay = (item.approvedBy ?? "unknown").replace(/_/g, "\\_");
     const authorDisplay = authorInfo ? ` (${authorInfo.name})` : "";
 
-    await sendToTopic(bot.telegram, item.chatId,
-      `⏳ *Procesando PR #${prInfo.prNumber}*\n` +
-        `📦 Repo: \`${prInfo.repo}\`\n` +
-        `👤 Aprobado por: @${approverDisplay}${authorDisplay}`,
-    );
+    try {
+      await sendToTopic(bot.telegram, item.chatId,
+        `⏳ *Procesando PR #${prInfo.prNumber}*\n` +
+          `📦 Repo: \`${prInfo.repo}\`\n` +
+          `👤 Aprobado por: @${approverDisplay}${authorDisplay}`,
+      );
+    } catch (e: unknown) {
+      logger.warn(`[Bot] Error enviando mensaje de inicio: ${e}`);
+    }
 
     const result = await awsBrowser.fullPrFlow(item.url, authorInfo, prInfo.prNumber);
     const finishedAt = new Date().toISOString();
@@ -65,31 +69,47 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
     await awsBrowser.close();
 
     if (result.success) {
-      await sendToTopic(bot.telegram, item.chatId,
-        `✅ *PR #${prInfo.prNumber} mergeado exitosamente*\n` +
-          `📦 Repo: \`${prInfo.repo}\`\n` +
-          `👤 Por: @${approverDisplay}`,
-      );
+      try {
+        await sendToTopic(bot.telegram, item.chatId,
+          `✅ *PR #${prInfo.prNumber} mergeado exitosamente*\n` +
+            `📦 Repo: \`${prInfo.repo}\`\n` +
+            `👤 Por: @${approverDisplay}`,
+        );
+      } catch (e: unknown) {
+        logger.warn(`[Bot] Error enviando mensaje de éxito: ${e}`);
+      }
     } else {
-      await sendToTopic(bot.telegram, item.chatId,
-        `❌ *Error en PR #${prInfo.prNumber}*\n` +
-          `📦 Repo: \`${prInfo.repo}\`\n` +
-          `*Error:* \`${result.error}\`\n\n` +
-          `⚠️ Revisa manualmente: ${item.url}`,
-      );
-      await bot.telegram.sendMessage(config.telegram.ownerUserId,
-        `❌ Error en PR #${prInfo.prNumber} (${prInfo.repo})\n\n` +
-          `Error: ${result.error}\n` +
-          `Pasos completados: ${result.steps.length > 0 ? result.steps.join(", ") : "Ninguno"}\n\n` +
-          `${item.url}`,
-      ).catch((e: unknown) => logger.warn(`[Bot] Error enviando DM de error al owner: ${e}`));
-      throw new Error(result.error);
+      try {
+        await sendToTopic(bot.telegram, item.chatId,
+          `❌ *Error en PR #${prInfo.prNumber}*\n` +
+            `📦 Repo: \`${prInfo.repo}\`\n` +
+            `Error: ${result.error ?? "desconocido"}\n\n` +
+            `⚠️ Revisa manualmente: ${item.url}`,
+        );
+      } catch (e: unknown) {
+        logger.warn(`[Bot] Error enviando mensaje de error al grupo: ${e}`);
+      }
+      try {
+        await bot.telegram.sendMessage(config.telegram.ownerUserId,
+          `❌ Error en PR #${prInfo.prNumber} (${prInfo.repo})\n\n` +
+            `Error: ${result.error ?? "desconocido"}\n` +
+            `Pasos completados: ${result.steps.length > 0 ? result.steps.join(", ") : "Ninguno"}\n\n` +
+            `${item.url}`,
+        );
+      } catch (e: unknown) {
+        logger.warn(`[Bot] Error enviando DM de error al owner: ${e}`);
+      }
+      throw new Error(result.error ?? "Error desconocido en merge");
     }
 
     if (queue.pendingCount > 0) {
-      await sendToTopic(bot.telegram, item.chatId,
-        `📋 ${queue.pendingCount} PR(s) en cola, procesando siguiente...`,
-      );
+      try {
+        await sendToTopic(bot.telegram, item.chatId,
+          `📋 ${queue.pendingCount} PR(s) en cola, procesando siguiente...`,
+        );
+      } catch (e: unknown) {
+        logger.warn(`[Bot] Error enviando mensaje de cola: ${e}`);
+      }
     }
   });
 
