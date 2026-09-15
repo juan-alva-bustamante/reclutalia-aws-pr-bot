@@ -29,7 +29,7 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
 
     // Promover a awaiting_approval y ejecutar análisis IA + enviar botones
     queue.promoteNextQueued();
-    await analyzeAndRequestApproval(bot, awsBrowser, item, prInfo, queue);
+    await analyzeAndRequestApproval(bot, awsBrowser, item.chatId, prInfo, queue);
   });
 
   // 3. Procesador de la cola (ejecuta merge)
@@ -90,10 +90,13 @@ export function createBot(awsBrowser: AWSBrowser): Telegraf {
         logger.warn(`[Bot] Error enviando mensaje de error al grupo: ${e}`);
       }
       try {
+        const stepsList = result.steps.length > 0
+          ? result.steps.map((s) => `  ${s}`).join("\n")
+          : "  Ninguno";
         await bot.telegram.sendMessage(config.telegram.ownerUserId,
           `❌ Error en PR #${prInfo.prNumber} (${prInfo.repo})\n\n` +
             `Error: ${result.error ?? "desconocido"}\n` +
-            `Pasos completados: ${result.steps.length > 0 ? result.steps.join(", ") : "Ninguno"}\n\n` +
+            `Pasos completados:\n${stepsList}\n\n` +
             `${item.url}`,
         );
       } catch (e: unknown) {

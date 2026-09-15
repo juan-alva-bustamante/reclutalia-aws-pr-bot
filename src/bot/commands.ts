@@ -10,7 +10,11 @@ export function registerCommands(bot: Telegraf, queue: PrQueue): void {
   bot.command("status", async (ctx) => {
     await ctx.reply(
       `🤖 *Bot de PR Autorización*\n\n✅ Activo\n\n*Cola:*\n${queue.getSummary()}\n\n` +
-        `/status /queue /log /pr <url>`,
+        `*Comandos:*\n` +
+        `/status — este resumen\n` +
+        `/queue — estado de la cola\n` +
+        `/log — últimos 5 PRs procesados\n` +
+        `/pr <url> — encolar un PR manualmente`,
       { parse_mode: "Markdown", message_thread_id: config.telegram.topicId },
     );
   });
@@ -34,7 +38,10 @@ export function registerCommands(bot: Telegraf, queue: PrQueue): void {
     }
     const url = ctx.message.text.split(" ")[1];
     if (!url) {
-      await ctx.reply("Uso: /pr <url>");
+      await ctx.reply(
+        "Uso: /pr <url>\n" +
+        "Ejemplo: /pr https://us-east-1.console.aws.amazon.com/codesuite/codecommit/repositories/mi-repo/pull-requests/12345/details?region=us-east-1",
+      );
       return;
     }
     const prInfo = parsePrInfo(url);

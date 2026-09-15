@@ -1,5 +1,4 @@
 import type { Telegraf } from "telegraf";
-import { Markup } from "telegraf";
 import { config } from "../config.js";
 import { logger } from "../logger.js";
 import type { PrInfo } from "../types.js";
@@ -50,29 +49,64 @@ export function isAuthorized(username: string | undefined): boolean {
   );
 }
 
+/** Texto del mensaje estándar de aprobación (sin IA) — usado en todos los flujos de aprobación */
+export function buildStandardApprovalText(prInfo: PrInfo): string {
+  return (
+    `🔔 *Solicitud de aprobación*\n\n` +
+    `📦 Repo: \`${prInfo.repo}\`\n` +
+    `🔢 PR #: \`${prInfo.prNumber}\`\n\n` +
+    `Antes de Aprobar se recomienda validar:\n` +
+    `▸ Ramas del PR (init-dev, dev-qa, qa-master)\n` +
+    `▸ Quien manda el PR\n` +
+    `▸ Cambios incluidos\n\n` +
+    `⁉ ¿Aprobar este PR?`
+  );
+}
+
+/** Teclado inline con los botones Aprobar/Rechazar para un PR */
+export function approvalKeyboard(prNumber: string): { inline_keyboard: { text: string; callback_data: string }[][] } {
+  return {
+    inline_keyboard: [[
+      { text: "✅ Aprobar", callback_data: `approve:${prNumber}` },
+      { text: "❌ Rechazar", callback_data: `reject:${prNumber}` },
+    ]],
+  };
+}
+
 /** Envía la solicitud de aprobación con botones inline */
 export async function sendApprovalRequest(
   telegram: Telegraf["telegram"],
   chatId: number | string,
   prInfo: PrInfo,
 ): Promise<void> {
-  await telegram.sendMessage(
-    chatId,
-    `🔔 *Solicitud de aprobación*\n\n` +
-      `📦 Repo: \`${prInfo.repo}\`\n` +
-      `🔢 PR #: \`${prInfo.prNumber}\`\n\n` +
-      `Antes de Aprobar se recomienda validar:\n` +
-      `▸ Ramas del PR (init-dev, dev-qa, qa-master)\n` +
-      `▸ Quien manda el PR\n` +
-      `▸ Cambios incluidos\n\n` +
-      `⁉ ¿Aprobar este PR?`,
-    {
-      parse_mode: "Markdown",
-      message_thread_id: config.telegram.topicId,
-      ...Markup.inlineKeyboard([
-        Markup.button.callback("✅ Aprobar", `approve:${prInfo.prNumber}`),
-        Markup.button.callback("❌ Rechazar", `reject:${prInfo.prNumber}`),
-      ]),
-    },
-  );
+  await telegram.sendMessage(chatId, buildStandardApprovalText(prInfo), {
+    parse_mode: "Markdown",
+    message_thread_id: config.telegram.topicId,
+    reply_markup: approvalKeyboard(prInfo.prNumber),
+  });
+}
+
+/**
+ * Avisa a un usuario que no está autorizado. Intenta primero por DM (igual de
+ * discreto que el toast que reciben los clicks de botón no autorizados); si el
+ * usuario nunca inició un chat privado con el bot, el DM falla y se avisa en el
+ * grupo como respaldo para no dejarlo sin feedback.
+ */
+export async function notifyUnauthorized(
+  telegram: Telegraf["telegram"],
+  userId: number | undefined,
+  username: string | undefined,
+  chatId: number | string,
+  action: "aprobar" | "rechazar",
+): Promise<void> {
+  const text = `⛔ No estás autorizado para ${action} PRs.`;
+  if (userId) {
+    try {
+      await telegram.sendMessage(userId, text);
+      return;
+    } catch {
+      /* el usuario nunca escribió al bot en privado — cae al aviso en grupo */
+    }
+  }
+  await sendToTopic(telegram, chatId, `⛔ @${username ?? "usuario"} no autorizado.`);
 }

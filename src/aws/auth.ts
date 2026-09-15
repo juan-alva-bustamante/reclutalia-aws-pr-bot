@@ -1,7 +1,7 @@
 import type { Page, BrowserContext } from "playwright";
 import { config } from "../config.js";
 import { logger } from "../logger.js";
-import { navigateAndWait, waitForAwsLoaders, waitForDomStable, sleep } from "./navigation.js";
+import { navigateAndWait, sleep } from "./navigation.js";
 import { dismissFeedbackModal, dismissCookieModal, dismissPopups } from "./popups.js";
 
 /** Callback type para solicitar MFA por Telegram */
@@ -15,7 +15,10 @@ export async function isLoggedIn(page: Page): Promise<boolean> {
       waitUntil: "domcontentloaded",
       timeout: 20_000,
     });
-    await sleep(5_000);
+    // Si no hay sesión válida, AWS redirige a signin casi de inmediato — esperamos
+    // activamente ese redirect (máx 2s) en vez de un sleep fijo de 5s que pagábamos
+    // en cada chequeo de sesión, incluso cuando ya estaba logueado.
+    await page.waitForURL(/signin\.aws\.amazon\.com/, { timeout: 2_000 }).catch(() => {});
     const url = page.url();
     const loggedIn = !url.includes("signin");
     if (loggedIn) {
@@ -149,11 +152,19 @@ export async function switchRole(
     } catch {
       /* timeout ok */
     }
-    await waitForAwsLoaders(page, 15_000);
-    await waitForDomStable(page);
 
-    // Espera de seguridad post-switch para evitar redirects tardíos
-    await sleep(2_000);
+    // El switch aterriza en el Console Home completo (dashboard con muchos widgets
+    // async: Cost, Solutions, Trusted Advisor, etc.) del que navegamos de inmediato
+    // después — no vale la pena esperar a que ESE dashboard se estabilice del todo.
+    // En vez de waitForAwsLoaders + waitForDomStable + sleep fijo sobre esa página,
+    // confirmamos puntualmente que el badge de rol activo ya muestra el rol nuevo.
+    await page
+      .locator(`text=${roleName}`)
+      .first()
+      .waitFor({ timeout: 8_000 })
+      .catch(() => {
+        logger.warn(`[AWS] No se confirmó el badge de rol '${roleName}' visualmente — continuando de todas formas`);
+      });
 
     logger.info(`[AWS] Rol ${roleName} activado ✅`);
     return true;

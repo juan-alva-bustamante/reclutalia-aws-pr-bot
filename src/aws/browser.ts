@@ -38,7 +38,9 @@ export class AWSBrowser {
   async start(): Promise<void> {
     this.browser = await chromium.launch({
       headless: config.headless,
-      slowMo: 50,
+      // slowMo solo sirve para debug visual en modo headed; en producción
+      // (headless=true) frena cada click/tecla sin ningún beneficio.
+      slowMo: config.headless ? 0 : 50,
     });
 
     this.context = existsSync(config.sessionFile)

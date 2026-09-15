@@ -1,7 +1,8 @@
 /**
- * Script manual para medir tiempos del flujo real hasta la aprobación con Manager.
- * NO cambia al rol MergeMaster ni navega a la pantalla de merge — se detiene
- * justo después de aprobar con Manager, a propósito.
+ * Script manual para medir tiempos del flujo real hasta tener el formulario de
+ * merge listo. Llega hasta llenar 3-way merge + Author name + Email en la
+ * pantalla de MergeMaster, pero NUNCA hace click en "Merge pull request"
+ * (dryRun) — a propósito.
  *
  * Uso:
  *   npx tsx src/scripts/test-approve-flow.ts <URL_DEL_PR>
@@ -16,7 +17,7 @@ import { config } from "../config.js";
 import { logger } from "../logger.js";
 import { AWSBrowser } from "../aws/browser.js";
 import { isLoggedIn, login, switchRole, saveSession } from "../aws/auth.js";
-import { approvePr } from "../aws/pr-actions.js";
+import { approvePr, mergePr } from "../aws/pr-actions.js";
 import { setupMfaHandler } from "../bot/mfa-handler.js";
 import { PrDebugger } from "../history/pr-debug.js";
 import { parsePrInfo } from "../utils/url-parser.js";
@@ -37,7 +38,8 @@ async function main(): Promise<void> {
 
   console.log(`\n🔎 Test de velocidad — PR #${prInfo.prNumber} (${prInfo.repo})`);
   console.log(`   Flujo: login → switch Authorizer → approve → switch Manager → approve`);
-  console.log(`   🛑 Se detiene ahí a propósito — NO toca MergeMaster ni la pantalla de merge.\n`);
+  console.log(`          → switch MergeMaster → llenar formulario de merge (3-way, author, email)`);
+  console.log(`   🛑 DRY RUN: se detiene ahí a propósito — NUNCA hace click en "Merge pull request".\n`);
 
   const bot = new Telegraf(config.telegram.token);
   const awsBrowser = new AWSBrowser();
@@ -112,8 +114,23 @@ async function main(): Promise<void> {
     if (!approvedManager) throw new Error("Approve (Manager) falló");
     console.log("✅ Aprobado con Manager\n");
 
+    console.log("🎭 Switch a rol MergeMaster...");
+    await debug.screenshot(page, "pre_switch_merge");
+    const switchedMerge = await switchRole(page, config.roles.merge.url, config.roles.merge.name);
+    mark("switch_merge_done");
+    await debug.screenshot(page, "post_switch_merge");
+    if (!switchedMerge) throw new Error("Switch a MergeMaster falló");
+
+    console.log("📝 Llenando formulario de merge (3-way, author, email) — DRY RUN, sin click final...");
+    const author = { name: config.aws.authorName, email: config.aws.authorEmail };
+    const mergeReady = await mergePr(page, prUrl, author, debug, { dryRun: true });
+    mark("merge_form_ready");
+    await debug.screenshot(page, "merge_form_dry_run_final");
+    if (!mergeReady) throw new Error("Preparar el formulario de merge falló");
+    console.log("✅ Formulario de merge listo (3-way, author, email llenados)\n");
+
     await saveSession(awsBrowser.getContext()!);
-    console.log("🛑 DETENIDO a propósito — no se cambió a MergeMaster ni se tocó merge.\n");
+    console.log("🛑 DETENIDO a propósito — formulario de merge listo, NO se hizo click en 'Merge pull request'.\n");
   } catch (e: unknown) {
     logger.error(`❌ Error en test de flujo: ${e instanceof Error ? e.message : String(e)}`);
     try {

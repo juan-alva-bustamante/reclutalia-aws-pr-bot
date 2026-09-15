@@ -3,44 +3,55 @@ import { config } from "../config.js";
 import { logger } from "../logger.js";
 import type { AWSBrowser } from "../aws/browser.js";
 import type { PrInfo } from "../types.js";
-import type { QueueItem } from "../types/queue.types.js";
 import type { PrQueue } from "../queue/pr-queue.js";
 import { prEmitter } from "../ws/pr-emitter.js";
-import { sendToTopic, sendApprovalRequest, escapeTelegramMarkdown } from "./helpers.js";
+import { isLoggedIn, login, saveSession } from "../aws/auth.js";
+import { scrapeDiff } from "../ai/diff-scraper.js";
+import { buildPRAnalysisPrompt } from "../ai/prompt-builder.js";
+import { callOllama } from "../ai/llm-client.js";
+import { parseLLMResponse } from "../ai/response-parser.js";
+import {
+  sendApprovalRequest,
+  buildStandardApprovalText,
+  approvalKeyboard,
+  escapeTelegramMarkdown,
+} from "./helpers.js";
 import type { PRAnalysis } from "../types/ai.types.js";
 
 /**
- * Ejecuta el análisis IA de un PR encolado y envía el mensaje de aprobación con botones.
- * Se usa cuando un PR estaba en `queued` y ahora es su turno (el browser está libre).
+ * Ejecuta el análisis IA de un PR (recién detectado o cuya vez llegó desde la cola)
+ * y envía el mensaje de aprobación con botones. Única implementación — se usa tanto
+ * cuando el browser está libre de inmediato como cuando un PR `queued` es promovido.
  *
  * Flujo:
- * 1. Login si necesario
- * 2. Scraping del diff
- * 3. Análisis con Ollama
- * 4. Enviar mensaje de aprobación con resumen IA (o estándar si falla)
+ * 1. Mensaje temporal "⏳ Obteniendo resumen IA..."
+ * 2. Login si necesario
+ * 3. Scraping del diff
+ * 4. Análisis con Ollama
+ * 5. Edita el mensaje temporal con el resultado (resumen IA, solo archivos, o estándar)
  *
- * No lanza excepciones — si la IA falla, envía mensaje estándar con botones.
+ * No lanza excepciones — si la IA falla o está deshabilitada, termina en el mensaje
+ * estándar con botones.
  */
 export async function analyzeAndRequestApproval(
   bot: Telegraf,
-  awsBrowser: AWSBrowser,
-  item: QueueItem,
+  awsBrowser: AWSBrowser | undefined,
+  chatId: number | string,
   prInfo: PrInfo,
   queue: PrQueue,
 ): Promise<void> {
-  // Si IA no está habilitada, enviar mensaje estándar con botones
-  if (!config.ai.enabled) {
-    await sendApprovalRequest(bot.telegram, item.chatId, prInfo);
+  if (!config.ai.enabled || !awsBrowser) {
+    await sendApprovalRequest(bot.telegram, chatId, prInfo);
     return;
   }
 
-  logger.info(`[AI] 🔄 Análisis IA para PR #${prInfo.prNumber} (desde cola)`);
+  logger.info(`[AI] 🔄 Análisis IA para PR #${prInfo.prNumber}`);
 
-  // Mensaje temporal
+  // Mensaje temporal — se edita al final en vez de borrarse + reenviarse
   let tempMessage: { message_id: number } | undefined;
   try {
     tempMessage = await bot.telegram.sendMessage(
-      item.chatId,
+      chatId,
       `⏳ *Obteniendo resumen IA para PR #${prInfo.prNumber}...*\n📦 Repo: \`${prInfo.repo}\``,
       { parse_mode: "Markdown", message_thread_id: config.telegram.topicId },
     );
@@ -64,7 +75,6 @@ export async function analyzeAndRequestApproval(
     }
 
     // Login si necesario
-    const { isLoggedIn, login, saveSession } = await import("../aws/auth.js");
     if (!(await isLoggedIn(page))) {
       logger.info("[AI] Sesión no activa, haciendo login para análisis...");
       const loginOk = await login(page, awsBrowser.onMfaRequired);
@@ -79,18 +89,13 @@ export async function analyzeAndRequestApproval(
 
     // Scraping del diff
     prEmitter.aiStep(prInfo.prNumber, prInfo.repo, "ai_scraping", "in_progress");
-    const { scrapeDiff } = await import("../ai/diff-scraper.js");
     const diffResult = await scrapeDiff(page, prInfo.url);
     filesChanged = diffResult.filesChanged;
     prEmitter.aiStep(prInfo.prNumber, prInfo.repo, "ai_scraping", "done");
 
-    // Análisis con Ollama
+    // Análisis con Ollama (solo si hay contenido)
     if (diffResult.content && diffResult.content.trim().length > 0) {
       prEmitter.aiStep(prInfo.prNumber, prInfo.repo, "ai_analyzing", "in_progress");
-      const { buildPRAnalysisPrompt } = await import("../ai/prompt-builder.js");
-      const { callOllama } = await import("../ai/llm-client.js");
-      const { parseLLMResponse } = await import("../ai/response-parser.js");
-
       const prompt = buildPRAnalysisPrompt(diffResult.content, filesChanged);
       const rawResponse = await callOllama(prompt, config.ai.ollama);
       analysis = parseLLMResponse(rawResponse);
@@ -99,24 +104,15 @@ export async function analyzeAndRequestApproval(
       logger.warn("[AI] Diff vacío, solo se mostrarán archivos");
     }
   } catch (e: unknown) {
-    logger.warn(`[AI] Error en análisis desde cola: ${e instanceof Error ? e.message : String(e)}`);
+    logger.warn(`[AI] Error en análisis: ${e instanceof Error ? e.message : String(e)}`);
   } finally {
     awsBrowser.setBusy(false);
-  }
-
-  // Borrar mensaje temporal
-  if (tempMessage) {
-    try {
-      await bot.telegram.deleteMessage(item.chatId, tempMessage.message_id);
-    } catch (e: unknown) {
-      logger.warn(`[AI] No se pudo borrar mensaje temporal: ${e}`);
-    }
   }
 
   // Emitir resultado al widget
   prEmitter.aiResult(prInfo.prNumber, prInfo.repo, analysis !== null, analysis?.summary, filesChanged);
 
-  // Guardar resumen IA en la cola
+  // Guardar resumen IA en la cola (para la bitácora)
   if (analysis?.summary) {
     logger.info(`[AI] 📝 Resumen: ${analysis.summary}`);
     if (analysis.changes.length > 0) logger.info(`[AI] 📁 Cambios: ${analysis.changes.join(", ")}`);
@@ -124,48 +120,55 @@ export async function analyzeAndRequestApproval(
     queue.setAiSummary(prInfo.prNumber, analysis.summary);
   }
 
-  // Enviar mensaje de aprobación con botones
   const messageText = analysis
     ? formatEnrichedMessage(prInfo, analysis)
     : filesChanged.length > 0
       ? formatFilesOnlyMessage(prInfo, filesChanged)
-      : formatStandardMessage(prInfo);
+      : buildStandardApprovalText(prInfo);
+  const keyboard = approvalKeyboard(prInfo.prNumber);
 
-  try {
-    await bot.telegram.sendMessage(
-      item.chatId,
-      messageText,
-      {
-        parse_mode: "Markdown",
-        message_thread_id: config.telegram.topicId,
-        reply_markup: {
-          inline_keyboard: [[
-            { text: "✅ Aprobar", callback_data: `approve:${prInfo.prNumber}` },
-            { text: "❌ Rechazar", callback_data: `reject:${prInfo.prNumber}` },
-          ]],
-        },
-      },
-    );
-  } catch (e: unknown) {
-    logger.warn(`[AI] Error enviando mensaje enriquecido con Markdown: ${e}`);
-    // Reintentar sin Markdown
+  // Camino feliz: editar el mensaje temporal en el resultado final (sin borrar +
+  // reenviar — un mensaje menos y sin el parpadeo de que el mensaje desaparezca).
+  if (tempMessage) {
     try {
-      await bot.telegram.sendMessage(
-        item.chatId,
-        messageText.replace(/[*`_\\]/g, ""),
-        {
-          message_thread_id: config.telegram.topicId,
-          reply_markup: {
-            inline_keyboard: [[
-              { text: "✅ Aprobar", callback_data: `approve:${prInfo.prNumber}` },
-              { text: "❌ Rechazar", callback_data: `reject:${prInfo.prNumber}` },
-            ]],
-          },
-        },
-      );
+      await bot.telegram.editMessageText(chatId, tempMessage.message_id, undefined, messageText, {
+        parse_mode: "Markdown",
+        reply_markup: keyboard,
+      });
+      return;
+    } catch (e: unknown) {
+      logger.warn(`[AI] Error editando mensaje con Markdown, reintentando sin formato: ${e}`);
+      try {
+        await bot.telegram.editMessageText(chatId, tempMessage.message_id, undefined, messageText.replace(/[*`_\\]/g, ""), {
+          reply_markup: keyboard,
+        });
+        return;
+      } catch (e2: unknown) {
+        logger.warn(`[AI] No se pudo editar el mensaje temporal, se reemplaza: ${e2}`);
+        try {
+          await bot.telegram.deleteMessage(chatId, tempMessage.message_id);
+        } catch { /* ya no importa, se sigue con el envío de un mensaje nuevo */ }
+      }
+    }
+  }
+
+  // Respaldo: no hubo mensaje temporal, o falló editarlo — enviar uno nuevo
+  try {
+    await bot.telegram.sendMessage(chatId, messageText, {
+      parse_mode: "Markdown",
+      message_thread_id: config.telegram.topicId,
+      reply_markup: keyboard,
+    });
+  } catch (e: unknown) {
+    logger.warn(`[AI] Error enviando mensaje con Markdown: ${e}`);
+    try {
+      await bot.telegram.sendMessage(chatId, messageText.replace(/[*`_\\]/g, ""), {
+        message_thread_id: config.telegram.topicId,
+        reply_markup: keyboard,
+      });
     } catch (e2: unknown) {
       logger.warn(`[AI] Error enviando sin formato, usando fallback estándar: ${e2}`);
-      await sendApprovalRequest(bot.telegram, item.chatId, prInfo);
+      await sendApprovalRequest(bot.telegram, chatId, prInfo);
     }
   }
 }
@@ -188,7 +191,7 @@ function formatEnrichedMessage(prInfo: PrInfo, analysis: PRAnalysis): string {
   return msg;
 }
 
-/** Formatea mensaje con solo los archivos modificados */
+/** Formatea mensaje con solo los archivos modificados (fallback cuando IA falla) */
 function formatFilesOnlyMessage(prInfo: PrInfo, files: string[]): string {
   let msg = `🔍 *PR detectado*\n\`${prInfo.repo}\` → PR #${prInfo.prNumber}\n\n`;
   msg += `📁 *Archivos modificados (${files.length}):*\n`;
@@ -197,18 +200,4 @@ function formatFilesOnlyMessage(prInfo: PrInfo, files: string[]): string {
   if (files.length > 15) msg += `• _...y ${files.length - 15} más_\n`;
   msg += "\n⁉ ¿Aprobar este PR?";
   return msg;
-}
-
-/** Formatea el mensaje estándar (sin IA) */
-function formatStandardMessage(prInfo: PrInfo): string {
-  return (
-    `🔔 *Solicitud de aprobación*\n\n` +
-    `📦 Repo: \`${prInfo.repo}\`\n` +
-    `🔢 PR #: \`${prInfo.prNumber}\`\n\n` +
-    `Antes de Aprobar se recomienda validar:\n` +
-    `▸ Ramas del PR (init-dev, dev-qa, qa-master)\n` +
-    `▸ Quien manda el PR\n` +
-    `▸ Cambios incluidos\n\n` +
-    `⁉ ¿Aprobar este PR?`
-  );
 }

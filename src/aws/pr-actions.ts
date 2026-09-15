@@ -15,7 +15,7 @@ export async function approvePr(page: Page, prUrl: string): Promise<boolean> {
     const approveBtn = await waitForButton(page, "Approve", 30_000);
     if (approveBtn) {
       logger.info(`[AWS] ✅ Approve via polling: '${approveBtn}'`);
-      await sleep(2_000);
+      await sleep(1_000);
       return true;
     }
 
@@ -55,12 +55,15 @@ export async function approvePr(page: Page, prUrl: string): Promise<boolean> {
   }
 }
 
-/** Navega al PR y ejecuta el merge completo */
+/** Navega al PR y ejecuta el merge completo. Con `dryRun: true`, llena todo el
+ *  formulario (3-way merge, author, email, delete branch) pero NO hace click
+ *  en "Merge pull request" — útil para pruebas de velocidad/UI sin mergear. */
 export async function mergePr(
   page: Page,
   prUrl: string,
   author?: { name: string; email: string },
   debug?: PrDebugger,
+  options?: { dryRun?: boolean },
 ): Promise<boolean> {
   logger.info(`[AWS] Navegando al PR para MERGE: ${prUrl}`);
   try {
@@ -69,7 +72,10 @@ export async function mergePr(
     await debug?.screenshot(page, "merge_page_loaded");
 
     // Click en botón "Merge"
-    const mergeClicked = await waitForButton(page, "Merge", 30_000);
+    // Nota: los permisos del rol MergeMaster pueden tardar en propagarse del lado
+    // de AWS más que el resto de los switches (se observó ~28s en pruebas reales),
+    // así que este es el único botón al que le damos más margen que el default.
+    const mergeClicked = await waitForButton(page, "Merge", 45_000);
     if (!mergeClicked) {
       if (!(await clickMergeButton(page))) {
         debug?.log("❌ Botón Merge no encontrado");
@@ -108,17 +114,23 @@ export async function mergePr(
       throw new Error("No se pudo seleccionar 3-way merge");
     }
     debug?.log("3-way merge seleccionado");
-    await sleep(2_000);
+    await sleep(1_000);
 
     // Llenar Author name y Email
     await fillMergeAuthorFields(page, author);
     debug?.log(`Author fields: ${author?.name ?? "default"} / ${author?.email ?? "default"}`);
-    await sleep(2_000);
+    await sleep(1_000);
 
     // Asegurar que "Delete source branch" NO esté marcado
     await uncheckDeleteBranch(page);
-    await sleep(1_000);
+    await sleep(500);
     await debug?.screenshot(page, "before_merge_submit");
+
+    if (options?.dryRun) {
+      debug?.log("🧪 DRY RUN: formulario listo, NO se hizo click en 'Merge pull request'");
+      logger.info("[AWS] 🧪 DRY RUN: formulario de merge listo, sin hacer click en 'Merge pull request'");
+      return true;
+    }
 
     // Click en "Merge pull request"
     await clickMergePullRequest(page);

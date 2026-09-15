@@ -131,10 +131,10 @@ export async function waitForAwsLoaders(page: Page, timeout: number): Promise<vo
   }
 }
 
-/** Espera a que el DOM se estabilice (sin mutaciones por 1 segundo) */
+/** Espera a que el DOM se estabilice (sin mutaciones por stableMs) */
 export async function waitForDomStable(
   page: Page,
-  stableMs = 1_000,
+  stableMs = 600,
   timeout = 15_000,
 ): Promise<void> {
   try {
