@@ -1,0 +1,461 @@
+<meta charset="utf-8">
+<title>Ciclo de Vida de un PR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f6f4ee;
+    --surface:#ffffff;
+    --surface-2:#efece2;
+    --ink:#1c1f26;
+    --muted:#6a7078;
+    --line:#dad5c8;
+
+    --accent-tg:#2f7fc1;
+    --accent-tg-soft:#e9f2fa;
+    --accent-aws:#a8611d;
+    --accent-aws-soft:#f6ece0;
+    --accent-ai:#6d4e9c;
+    --accent-ai-soft:#efeaf6;
+    --ok:#3f8b46;
+    --ok-soft:#e7f3e8;
+    --err:#b3392f;
+    --err-soft:#fbeae8;
+    --gate-fill:#fbedc9;
+    --gate-stroke:#b9821c;
+
+    --font-sans:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono:"IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+    --gutter:24px;
+  }
+
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#12151b;
+      --surface:#1a1e26;
+      --surface-2:#20242e;
+      --ink:#e9e7e1;
+      --muted:#9aa0a8;
+      --line:#333a47;
+
+      --accent-tg:#74b8ef;
+      --accent-tg-soft:#1b3348;
+      --accent-aws:#e0975a;
+      --accent-aws-soft:#3a2a1b;
+      --accent-ai:#b89ee0;
+      --accent-ai-soft:#2b2438;
+      --ok:#74c37a;
+      --ok-soft:#1f3320;
+      --err:#e58077;
+      --err-soft:#3a201d;
+      --gate-fill:#3c3018;
+      --gate-stroke:#dba53f;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#12151b;
+    --surface:#1a1e26;
+    --surface-2:#20242e;
+    --ink:#e9e7e1;
+    --muted:#9aa0a8;
+    --line:#333a47;
+
+    --accent-tg:#74b8ef;
+    --accent-tg-soft:#1b3348;
+    --accent-aws:#e0975a;
+    --accent-aws-soft:#3a2a1b;
+    --accent-ai:#b89ee0;
+    --accent-ai-soft:#2b2438;
+    --ok:#74c37a;
+    --ok-soft:#1f3320;
+    --err:#e58077;
+    --err-soft:#3a201d;
+    --gate-fill:#3c3018;
+    --gate-stroke:#dba53f;
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--font-sans);
+    padding-inline:var(--gutter);
+    padding-block:40px 56px;
+    max-width:1180px;
+    margin:0 auto;
+  }
+
+  .eyebrow{
+    font-family:var(--font-mono);
+    font-size:12.5px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--muted);
+    margin:0 0 10px;
+  }
+  h1{
+    font-size:clamp(28px,4vw,38px);
+    font-weight:700;
+    letter-spacing:-.01em;
+    text-wrap:balance;
+    margin:0 0 14px;
+  }
+  .dek{
+    font-size:16.5px;
+    line-height:1.6;
+    color:var(--ink);
+    max-width:66ch;
+    margin:0 0 28px;
+  }
+  .dek strong{ font-weight:600; }
+
+  .legend{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px 22px;
+    padding:14px 18px;
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:12px;
+    margin-bottom:22px;
+  }
+  .legend-item{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:13px;
+    color:var(--muted);
+    white-space:nowrap;
+  }
+  .legend-swatch{
+    width:13px;height:13px;border-radius:4px;
+    flex:none;
+    border:2px solid var(--line);
+    background:var(--surface-2);
+  }
+  .legend-swatch.tg{ border-color:var(--accent-tg); background:var(--accent-tg-soft); }
+  .legend-swatch.ai{ border-color:var(--accent-ai); background:var(--accent-ai-soft); border-style:dashed; }
+  .legend-swatch.aws{ border-color:var(--accent-aws); background:var(--accent-aws-soft); }
+  .legend-swatch.gate{ border-color:var(--gate-stroke); background:var(--gate-fill); }
+  .legend-swatch.wait{ border-color:var(--muted); background:var(--surface-2); border-style:dashed; }
+  .legend-swatch.err{ border-color:var(--err); background:var(--err-soft); }
+
+  .diagram-scroll{
+    overflow-x:auto;
+    margin-inline:calc(-1 * var(--gutter));
+    padding-inline:var(--gutter);
+    padding-bottom:6px;
+  }
+  figure{ margin:0; }
+  svg.pr-diagram{
+    display:block;
+    width:1760px;
+    max-width:none;
+    height:auto;
+  }
+  figcaption{
+    font-size:13.5px;
+    color:var(--muted);
+    max-width:78ch;
+    margin-top:14px;
+    line-height:1.55;
+  }
+
+  .page-foot{
+    margin-top:34px;
+    padding-top:18px;
+    border-top:1px solid var(--line);
+    font-size:13px;
+    color:var(--muted);
+    line-height:1.6;
+  }
+  .page-foot code{
+    font-family:var(--font-mono);
+    font-size:12px;
+    background:var(--surface-2);
+    padding:1px 5px;
+    border-radius:4px;
+    color:var(--ink);
+  }
+
+  /* ---- SVG node/edge styling ---- */
+  .lane-bg{ fill:var(--surface-2); stroke:var(--line); stroke-width:1.5; }
+  .lane-label{
+    font-family:var(--font-mono);
+    font-size:21px;
+    letter-spacing:.09em;
+    fill:var(--muted);
+  }
+  .zone-cool{ fill:var(--accent-tg-soft); }
+  .zone-warm{ fill:var(--accent-aws-soft); }
+  .zone-label{ font-family:var(--font-mono); font-size:18px; letter-spacing:.07em; }
+  .zone-label.cool{ fill:var(--accent-tg); }
+  .zone-label.warm{ fill:var(--accent-aws); }
+
+  .node-rect{ fill:var(--surface); stroke:var(--line); stroke-width:2.5; }
+  .node-title, .node-text{
+    fill:var(--ink);
+    font-family:var(--font-sans);
+    font-size:20px;
+    text-anchor:middle;
+  }
+  .node-code{ font-family:var(--font-mono); font-size:18px; }
+
+  .node--tg .node-rect{ stroke:var(--accent-tg); }
+  .node--ai .node-rect{ fill:var(--accent-ai-soft); stroke:var(--accent-ai); stroke-dasharray:9 6; }
+  .node--aws .node-rect{ stroke:var(--accent-aws); }
+  .node--aws-strong .node-rect{ stroke:var(--accent-aws); stroke-width:4.5; }
+  .node--wait .node-rect{ fill:var(--surface-2); stroke:var(--muted); stroke-dasharray:9 6; }
+  .node--err .node-rect{ fill:var(--err-soft); stroke:var(--err); }
+  .node--gate .node-rect{ fill:var(--gate-fill); stroke:var(--gate-stroke); stroke-width:4.5; }
+
+  .diamond{ fill:var(--surface); stroke:var(--line); stroke-width:2.5; }
+
+  .edge{ fill:none; stroke:var(--muted); stroke-width:3; }
+  .edge--dashed{ stroke-dasharray:9 7; }
+  .edge--ok{ stroke:var(--ok); }
+  .edge--err{ stroke:var(--err); stroke-dasharray:9 7; }
+  .arrowhead{ fill:var(--muted); }
+  .arrowhead--ok{ fill:var(--ok); }
+  .arrowhead--err{ fill:var(--err); }
+
+  .edge-label{
+    font-family:var(--font-mono);
+    font-size:16.5px;
+    fill:var(--muted);
+    text-anchor:middle;
+  }
+  .edge-label.ok{ fill:var(--ok); }
+  .edge-label.err{ fill:var(--err); }
+  .edge-label.strong{ fill:var(--ink); font-weight:600; }
+</style>
+
+<p class="eyebrow">reclutalia-aws-pr-bot</p>
+<h1>Ciclo de vida de un PR</h1>
+<p class="dek">
+  Desde que alguien pega una URL de CodeCommit en Telegram hasta que AWS confirma el merge,
+  el PR cruza tres sistemas. Pero solo pasa por <strong>un punto de decisión humana</strong>:
+  todo lo que ocurre después de ese ✅ corre solo, sin supervisión, directo a producción.
+</p>
+
+<div class="legend">
+  <span class="legend-item"><span class="legend-swatch tg"></span>Telegram</span>
+  <span class="legend-item"><span class="legend-swatch gate"></span>Punto de decisión humana</span>
+  <span class="legend-item"><span class="legend-swatch ai"></span>IA opcional (Ollama)</span>
+  <span class="legend-item"><span class="legend-swatch aws"></span>AWS Console (Playwright)</span>
+  <span class="legend-item"><span class="legend-swatch wait"></span>Espera / opcional</span>
+  <span class="legend-item"><span class="legend-swatch err"></span>Estado terminal de error/rechazo</span>
+</div>
+
+<div class="diagram-scroll">
+  <figure>
+    <svg class="pr-diagram" viewBox="0 0 2340 900" role="img"
+      aria-label="Diagrama de flujo: un PR entra por Telegram, opcionalmente se analiza con IA, pasa por un único punto de aprobación humana y luego el bot ejecuta sin supervisión el login, doble aprobación y merge en AWS Console, reportando el resultado de vuelta en Telegram.">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 Z" class="arrowhead"/>
+        </marker>
+        <marker id="arrow-ok" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 Z" class="arrowhead--ok"/>
+        </marker>
+        <marker id="arrow-err" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 Z" class="arrowhead--err"/>
+        </marker>
+        <filter id="lift" x="-30%" y="-30%" width="160%" height="160%">
+          <feDropShadow dx="0" dy="4" stdDeviation="6" flood-opacity="0.28"/>
+        </filter>
+      </defs>
+
+      <!-- ── Header strip: the one claim ── -->
+      <rect class="zone-cool" x="40" y="0" width="1260" height="34" rx="8"/>
+      <rect class="zone-warm" x="1320" y="0" width="980" height="34" rx="8"/>
+      <text class="zone-label cool" x="670" y="23" text-anchor="middle">ZONA REVISABLE POR UN HUMANO</text>
+      <text class="zone-label warm" x="1810" y="23" text-anchor="middle">AUTOMATIZADO EN AWS · SIN SUPERVISIÓN</text>
+
+      <!-- ── Lane backgrounds ── -->
+      <rect class="lane-bg" x="40" y="50" width="2260" height="220" rx="18"/>
+      <text class="lane-label" x="64" y="82">TELEGRAM</text>
+
+      <rect class="lane-bg" x="40" y="285" width="2260" height="345" rx="18"/>
+      <text class="lane-label" x="64" y="317">PROCESO NODE.JS · COLA</text>
+
+      <rect class="lane-bg" x="40" y="650" width="2260" height="230" rx="18"/>
+      <text class="lane-label" x="64" y="682">AWS CONSOLE · PLAYWRIGHT</text>
+
+      <!-- ══════════════ EDGES (drawn first, under nodes) ══════════════ -->
+      <!-- E1 start -> parse -->
+      <path class="edge" marker-end="url(#arrow)" d="M280,207 L280,391"/>
+      <!-- E2 parse -> busy -->
+      <path class="edge" marker-end="url(#arrow)" d="M395,430 L445,430"/>
+      <!-- E3 busy -> queued (sí) -->
+      <path class="edge" marker-end="url(#arrow)" d="M500,478 L530,560"/>
+      <text class="edge-label" x="545" y="510">sí, ocupado</text>
+      <!-- E4 busy -> ai (no) -->
+      <path class="edge" marker-end="url(#arrow)" d="M615,430 L680,430"/>
+      <text class="edge-label" x="648" y="415">no</text>
+      <!-- E5 queued -> ai -->
+      <path class="edge edge--dashed" marker-end="url(#arrow)" d="M640,590 L780,590 L780,477"/>
+      <text class="edge-label" x="710" y="612">promoteNextQueued()</text>
+      <!-- E6 ai -> gate -->
+      <path class="edge" marker-end="url(#arrow)" d="M960,415 L960,300 L1150,300 L1150,212"/>
+      <text class="edge-label" x="1055" y="288">envía mensaje (+ resumen IA)</text>
+      <!-- E7 gate -> rejected -->
+      <path class="edge edge--err" marker-end="url(#arrow-err)" d="M1090,212 L1090,500 L1150,500 L1150,560"/>
+      <text class="edge-label err strong" x="1030" y="460">❌ rechaza</text>
+      <!-- E8 gate -> pending -->
+      <path class="edge edge--ok" marker-end="url(#arrow-ok)" d="M1210,212 L1210,300 L1500,300 L1500,391"/>
+      <text class="edge-label ok strong" x="1350" y="288">✅ aprueba → queue.approve()</text>
+      <!-- E9 pending -> login -->
+      <path class="edge" marker-end="url(#arrow)" d="M1500,469 L1500,724"/>
+      <text class="edge-label" x="1500" y="605" class="edge-label">fullPrFlow()</text>
+      <!-- E10..E12 aws chain -->
+      <path class="edge" marker-end="url(#arrow)" d="M1605,765 L1618,765"/>
+      <path class="edge" marker-end="url(#arrow)" d="M1825,765 L1838,765"/>
+      <path class="edge" marker-end="url(#arrow)" d="M2045,765 L2058,765"/>
+      <!-- E13 merge -> log (éxito) -->
+      <path class="edge edge--ok" marker-end="url(#arrow-ok)" d="M2130,724 L2130,629"/>
+      <text class="edge-label ok strong" x="2075" y="683">✅ éxito</text>
+      <!-- E14 merge -> log (error) -->
+      <path class="edge edge--err" marker-end="url(#arrow-err)" d="M2190,724 L2190,629"/>
+      <text class="edge-label err strong" x="2245" y="683">❌ error</text>
+      <!-- E15 log -> result -->
+      <path class="edge" marker-end="url(#arrow)" d="M2160,551 L2160,207"/>
+      <!-- E16 log -> busy (loop back) -->
+      <path class="edge edge--dashed" marker-end="url(#arrow)" d="M2100,551 L2100,278 L560,278 L560,372"/>
+      <text class="edge-label" x="300" y="266">siguiente PR en cola</text>
+      <!-- E-mfa: login <-> telegram DM -->
+      <path class="edge edge--dashed" marker-start="url(#arrow)" marker-end="url(#arrow)" d="M1800,124 L1800,680 L1570,680 L1570,724"/>
+      <text class="edge-label" x="1800" y="410" transform="rotate(-90 1800 410)">DM con código MFA</text>
+
+      <!-- ══════════════ NODES ══════════════ -->
+
+      <!-- T-start -->
+      <g class="node--tg">
+        <rect class="node-rect" x="160" y="113" width="240" height="94" rx="16"/>
+        <text class="node-text" x="280" y="145">👤 Alguien pega la URL</text>
+        <text class="node-text" x="280" y="171">de un PR de CodeCommit</text>
+        <text class="node-text" x="280" y="197">en el topic de Telegram</text>
+      </g>
+
+      <!-- T-gate (the claim) -->
+      <g class="node--gate" filter="url(#lift)">
+        <rect class="node-rect" x="1005" y="108" width="290" height="104" rx="18"/>
+        <text class="node-text" x="1150" y="145" style="font-weight:600">✅ Aprobar · ❌ Rechazar</text>
+        <text class="node-text" x="1150" y="171">un usuario autorizado</text>
+        <text class="node-text" x="1150" y="197">responde en Telegram</text>
+      </g>
+
+      <!-- T-mfa -->
+      <g class="node--wait">
+        <rect class="node-rect" x="1685" y="66" width="230" height="58" rx="12"/>
+        <text class="node-text node-code" x="1800" y="90">🔐 si AWS pide MFA:</text>
+        <text class="node-text node-code" x="1800" y="112">DM al owner con el código</text>
+      </g>
+
+      <!-- T-result -->
+      <g class="node--tg">
+        <rect class="node-rect" x="2040" y="113" width="240" height="94" rx="16"/>
+        <text class="node-text" x="2160" y="145">📨 Bot reporta el resultado</text>
+        <text class="node-text" x="2160" y="171">en el grupo (+ DM al owner</text>
+        <text class="node-text" x="2160" y="197">si falla)</text>
+      </g>
+
+      <!-- B-parse -->
+      <g>
+        <rect class="node-rect" x="165" y="391" width="230" height="78" rx="14"/>
+        <text class="node-text node-code" x="280" y="418">🔎 parsePrInfo()</text>
+        <text class="node-text" x="280" y="442">detecta y descarta</text>
+        <text class="node-text" x="280" y="464">duplicados</text>
+      </g>
+
+      <!-- B-busy diamond -->
+      <g>
+        <polygon class="diamond" points="530,372 615,430 530,488 445,430"/>
+        <text class="node-text" x="530" y="424">¿Browser</text>
+        <text class="node-text" x="530" y="446">ocupado?</text>
+      </g>
+
+      <!-- B-ai -->
+      <g class="node--ai">
+        <rect class="node-rect" x="680" y="383" width="280" height="94" rx="16"/>
+        <text class="node-text" x="820" y="413" style="font-weight:600">🤖 IA opcional</text>
+        <text class="node-text" x="820" y="439">Ollama analiza el diff →</text>
+        <text class="node-text" x="820" y="463">enriquece el mensaje</text>
+      </g>
+
+      <!-- B-pending -->
+      <g>
+        <rect class="node-rect" x="1370" y="391" width="260" height="78" rx="14"/>
+        <text class="node-text node-code" x="1500" y="418">▶️ status: pending →</text>
+        <text class="node-text node-code" x="1500" y="440">processing</text>
+        <text class="node-text" x="1500" y="462">(1 PR a la vez)</text>
+      </g>
+
+      <!-- B-queued -->
+      <g class="node--wait">
+        <rect class="node-rect" x="420" y="560" width="220" height="60" rx="12"/>
+        <text class="node-text node-code" x="530" y="584">⏳ status: queued</text>
+        <text class="node-text" x="530" y="606">espera su turno</text>
+      </g>
+
+      <!-- B-rejected -->
+      <g class="node--err">
+        <rect class="node-rect" x="1035" y="560" width="230" height="60" rx="12"/>
+        <text class="node-text node-code" x="1150" y="584">🚫 status: rejected</text>
+        <text class="node-text" x="1150" y="606">fin — se avisa en Telegram</text>
+      </g>
+
+      <!-- B-log -->
+      <g>
+        <rect class="node-rect" x="2030" y="551" width="260" height="78" rx="14"/>
+        <text class="node-text node-code" x="2160" y="580">📒 logPrResult()</text>
+        <text class="node-text" x="2160" y="606">+ cierra el browser</text>
+      </g>
+
+      <!-- A-login -->
+      <g class="node--aws">
+        <rect class="node-rect" x="1395" y="724" width="210" height="82" rx="14"/>
+        <text class="node-text" x="1500" y="757">🔑 Login en AWS</text>
+        <text class="node-text" x="1500" y="781">sesión guardada o + MFA</text>
+      </g>
+
+      <!-- A-authorizer -->
+      <g class="node--aws">
+        <rect class="node-rect" x="1615" y="724" width="210" height="82" rx="14"/>
+        <text class="node-text" x="1720" y="757">🎭 Switch → Authorizer</text>
+        <text class="node-text" x="1720" y="781">✅ Approve</text>
+      </g>
+
+      <!-- A-manager -->
+      <g class="node--aws">
+        <rect class="node-rect" x="1835" y="724" width="210" height="82" rx="14"/>
+        <text class="node-text" x="1940" y="757">🎭 Switch → Manager</text>
+        <text class="node-text" x="1940" y="781">✅ Approve</text>
+      </g>
+
+      <!-- A-merge -->
+      <g class="node--aws-strong" filter="url(#lift)">
+        <rect class="node-rect" x="2055" y="724" width="210" height="82" rx="14"/>
+        <text class="node-text" x="2160" y="757" style="font-weight:600">🔀 Switch → MergeMaster</text>
+        <text class="node-text" x="2160" y="781">3-way merge</text>
+      </g>
+
+    </svg>
+    <figcaption>
+      Un solo mensaje puede traer varios PRs a la vez; cada uno recorre este ciclo de forma independiente.
+      Si el bot está ocupado (mergeando otro PR o analizando un diff con IA), el nuevo PR entra como
+      <code>queued</code> y espera su turno antes de pedir aprobación — el resto del ciclo es idéntico.
+      Detalle paso a paso de cada caja (selectores, reintentos, fallbacks de IA) en <code>docs/mejoras/ciclo-vida-pr.md</code>;
+      mejoras propuestas —incluyendo por qué el gate de aprobación debería validar repo, no solo número de PR— en
+      <code>docs/mejoras/plan-correcciones.md</code>.
+    </figcaption>
+  </figure>
+</div>
+
+<div class="page-foot">
+  Generado a partir del código en <code>src/</code>: <code>bot/handlers.ts</code>, <code>queue/pr-queue.ts</code>,
+  <code>aws/browser.ts</code>, <code>aws/auth.ts</code>, <code>aws/pr-actions.ts</code> y
+  <code>bot/pre-merge-analysis.ts</code>. Reemplaza a <code>docs/diagrama-flujo-approve-pr.md</code> y
+  <code>docs/Flujo simplificado.md</code>, que no cubrían el análisis con IA ni el estado <code>queued</code>.
+</div>
